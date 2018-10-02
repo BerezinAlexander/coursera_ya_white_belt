@@ -10,32 +10,27 @@
 
 using namespace std;
 
-int Factorial(int val)
+bool IsPalindrom(string text)
 {
-	if (val < 2)
-		return 1;
+	if (text.empty())
+		return true;
 
-	return val * Factorial(val - 1);
+	int middle = text.size() / 2;
+	for (size_t i = 0; i < middle; i++)
+	{
+		if (text[i] != text[text.size() - i - 1])
+			return false;
+	}
+
+	return true;
 }
 
 //int main()
 //{
-//	int n;
-//	cin >> n;
+//	string text;
+//	cin >> text;
 //
-//	vector<int> res;
-//
-//	while (n > 1) {
-//		res.push_back(n % 2);
-//		n /= 2;
-//	}
-//	res.push_back(n);
-//
-//	reverse(res.begin(), res.end());
-//	for (auto val : res) {
-//		cout << val;
-//	}
-//	cout << endl;
+//	cout << boolalpha << IsPalindrom(text) << endl;
 //
 //
 //#ifdef _MSC_VER
