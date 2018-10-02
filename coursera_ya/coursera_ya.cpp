@@ -10,10 +10,12 @@
 
 using namespace std;
 
-void UpdateIfGreater(const int first, int& second)
+void MoveStrings(vector<string>& source, vector<string>& destination)
 {
-	if (first > second)
-		second = first;
+	for (auto& str : source) {
+		destination.push_back(str);
+	}
+	source.clear();
 }
 
 //int main()
