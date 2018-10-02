@@ -10,9 +10,11 @@
 
 using namespace std;
 
-void Reverse(vector<int>& v)
+vector<int> Reversed(const vector<int>& v)
 {
-	reverse(v.begin(), v.end());
+	vector<int> v2(v);
+	reverse(v2.begin(), v2.end());
+	return v2;
 }
 
 //int main()
