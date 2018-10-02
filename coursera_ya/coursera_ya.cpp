@@ -10,30 +10,38 @@
 
 using namespace std;
 
-int main()
+int Factorial(int val)
 {
-	int n;
-	cin >> n;
+	if (val < 2)
+		return 1;
 
-	vector<int> res;
-
-	while (n > 1) {
-		res.push_back(n % 2);
-		n /= 2;
-	}
-	res.push_back(n);
-
-	reverse(res.begin(), res.end());
-	for (auto val : res) {
-		cout << val;
-	}
-	cout << endl;
-
-
-#ifdef _MSC_VER
-	system("pause");
-#endif
-
-    return 0;
+	return val * Factorial(val - 1);
 }
+
+//int main()
+//{
+//	int n;
+//	cin >> n;
+//
+//	vector<int> res;
+//
+//	while (n > 1) {
+//		res.push_back(n % 2);
+//		n /= 2;
+//	}
+//	res.push_back(n);
+//
+//	reverse(res.begin(), res.end());
+//	for (auto val : res) {
+//		cout << val;
+//	}
+//	cout << endl;
+//
+//
+//#ifdef _MSC_VER
+//	system("pause");
+//#endif
+//
+//    return 0;
+//}
 
