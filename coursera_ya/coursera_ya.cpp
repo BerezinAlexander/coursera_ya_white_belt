@@ -15,28 +15,39 @@ int main()
 	int n;
 	cin >> n;
 
-	int mid = 0;
-	vector<int> vec(n);
-	for (auto& v : vec) {
-		cin >> v;
-		mid += v;
-	}
-	mid /= n;
-
-	vector<int> result;
-	int count = 0;
-	for (auto v : vec) {
-		if (v > mid) {
-			result.push_back(count);
+	vector<int> q;
+	for (int i = 0; i < n; i++) {
+		string command;
+		int num;		
+		cin >> command;
+		
+		if (command == "WORRY") {
+			cin >> num;
+			q[num] = 1;
 		}
-		count++;
+		else if(command == "QUIET") {
+			cin >> num;
+			q[num] = 0;
+		}
+		else if (command == "COME") {
+			cin >> num;
+			if (num < 0) {
+				for (int j = 0; j < abs(num); j++)
+					q.pop_back();
+			}
+			else {
+				for (int j = 0; j < abs(num); j++)
+					q.push_back(0);
+			}
+		}
+		else if (command == "WORRY_COUNT") {
+			int crazy = 0;
+			for (auto state : q)
+				if (state == 1)
+					crazy++;
+			cout << crazy << endl;
+		}
 	}
-
-	cout << result.size() << endl;
-	for (auto& v : result) {
-		cout << v << " ";
-	}
-	cout << endl;
 
 #ifdef _MSC_VER
 	system("pause");
