@@ -7,24 +7,35 @@
 
 using namespace std;
 
-void calc(int a, int b)
+void calc(float n, float a, float b, float x, float y)
 {
-	if (b == 0)
-		cout << "Impossible" << endl;
+	if (n > b)
+		cout << n - (n * y / 100.) << endl;
+	else if (n > a)
+		cout << n - (n * x / 100.) << endl;
 	else
-		cout << a / b << endl;
+		cout << n << endl;
 }
+
+//void calc(int a, int b)
+//{
+//	for (int i = a; i <= b; i++) {
+//		if (i % 2 == 0)
+//			cout << i << " ";
+//	}
+//}
 
 int main()
 {
-	int a, b;
+	float n, a, b, x, y;
+	cin >> n >> a >> b >> x >> y;
+	calc(n, a, b, x, y);
 
-	cin >> a >> b;
+	//int a, b;
+	//cin >> a >> b;
+	//calc(a, b);
 
-	calc(a,b);
-
-
-	//system("pause");
+	system("pause");
     return 0;
 }
 
