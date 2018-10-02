@@ -10,34 +10,17 @@
 
 using namespace std;
 
-bool IsPalindrom(string text)
+void UpdateIfGreater(const int first, int& second)
 {
-	if (text.empty())
-		return true;
-
-	int middle = text.size() / 2;
-	for (size_t i = 0; i < middle; i++)
-	{
-		if (text[i] != text[text.size() - i - 1])
-			return false;
-	}
-
-	return true;
-}
-
-vector<string> PalindromFilter(vector<string> words, int minLength)
-{
-	vector<string> result;
-	for (auto& word : words) {
-		if (IsPalindrom(word) && word.size() >= minLength) {
-			result.push_back(word);
-		}
-	}
-	return result;
+	if (first > second)
+		second = first;
 }
 
 //int main()
 //{
+//	const vector<int> numbers = { 1, 2, 3, 4, 5 };
+//	for (auto x : numbers) { cout << x << " "; }
+//
 //	string text;
 //	cin >> text;
 //
@@ -50,4 +33,4 @@ vector<string> PalindromFilter(vector<string> words, int minLength)
 //
 //    return 0;
 //}
-
+//
