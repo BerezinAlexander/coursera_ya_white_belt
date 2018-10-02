@@ -10,12 +10,9 @@
 
 using namespace std;
 
-void MoveStrings(vector<string>& source, vector<string>& destination)
+void Reverse(vector<int>& v)
 {
-	for (auto& str : source) {
-		destination.push_back(str);
-	}
-	source.clear();
+	reverse(v.begin(), v.end());
 }
 
 //int main()
