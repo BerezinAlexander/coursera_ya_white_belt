@@ -16,27 +16,14 @@ int main()
 	int num_q;
 	cin >> num_q;
 
-	int count_bus = 0;
-	map<vector<string>, int> buses; // <stops, num_bus>
-
+	set<string> uniq_str;
 	for (int i = 0; i < num_q; i++) {
-		int count;
-		cin >> count;
-
-		vector<string> stops(count);
-		for (int i = 0; i < count; i++) {
-			cin >> stops[i];
-		}
-
-		if (buses.count(stops) == 0) {
-			buses[stops] = ++count_bus;
-			cout << "New bus ";
-		}
-		else {
-			cout << "Already exists for ";
-		}
-		cout << buses[stops] << endl;
+		string s;
+		cin >> s;
+		uniq_str.insert(s);
 	}
+
+	cout << uniq_str.size() << endl;
 
 
 #ifdef _MSC_VER
