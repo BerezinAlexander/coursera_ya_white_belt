@@ -11,47 +11,123 @@
 
 using namespace std;
 
+#include <algorithm>
+#include <map>
+#include <vector>
+
+using namespace std;
+
+vector<string> FindNamesHistory(const map<int, string>& names_by_year,
+	int year) {
+	vector<string> names;
+	// перебираем всю историю в хронологическом пор€дке
+	for (const auto& item : names_by_year) {
+		// если очередное им€ не относитс€ к будущему и отличаетс€ от предыдущего,
+		if (item.first <= year && (names.empty() || names.back() != item.second)) {
+			// добавл€ем его в историю
+			names.push_back(item.second);
+		}
+	}
+	return names;
+}
+
+string BuildJoinedName(vector<string> names) {
+	// нет истории Ч им€ неизвестно
+	if (names.empty()) {
+		return "";
+	}
+	// мен€ем пр€мой хронологический пор€док на обратный
+	reverse(begin(names), end(names));
+
+	// начинаем строить полное им€ с самого последнего
+	string joined_name = names[0];
+
+	// перебираем все последующие имена
+	for (int i = 1; i < names.size(); ++i) {
+		if (i == 1) {
+			// если это первое Ђисторическоеї им€, отдел€ем его от последнего скобкой
+			joined_name += " (";
+		}
+		else {
+			// если это не первое им€, отдел€ем от предыдущего зап€той
+			joined_name += ", ";
+		}
+		// и добавл€ем очередное им€
+		joined_name += names[i];
+	}
+
+	// если в истории было больше одного имени, мы открывали скобку Ч закроем еЄ
+	if (names.size() > 1) {
+		joined_name += ")";
+	}
+	// им€ со всей историей готово
+	return joined_name;
+}
+
+// см. решение предыдущей задачи
+string BuildFullName(const string& first_name, const string& last_name) {
+	if (first_name.empty() && last_name.empty()) {
+		return "Incognito";
+	}
+	else if (first_name.empty()) {
+		return last_name + " with unknown first name";
+	}
+	else if (last_name.empty()) {
+		return first_name + " with unknown last name";
+	}
+	else {
+		return first_name + " " + last_name;
+	}
+}
+
 class Person {
 public:
 	void ChangeFirstName(int year, const string& first_name) {
-		// добавить факт изменени€ имени на first_name в год year
-		history_first[year] = first_name;
+		first_names[year] = first_name;
 	}
 	void ChangeLastName(int year, const string& last_name) {
-		// добавить факт изменени€ фамилии на last_name в год year
-		history_last[year] = last_name;
+		last_names[year] = last_name;
 	}
-	string GetFullName(int year) {
-		// получить им€ и фамилию по состо€нию на конец года year
-		auto first = find_if(history_first.rbegin(), history_first.rend(), 
-			[&year](const auto& p) {
-				return p.first <= year;
-			}
-		);
-		auto last = find_if(history_last.rbegin(), history_last.rend(),
-			[&year](const auto& p) {
-				return p.first <= year;
-			}
-		);
 
-		if (first == history_first.rend() && last == history_last.rend()) {
-			return "Incognito";
+	string GetFullName(int year) {
+		// найдЄм историю изменений имени и фамилии
+		// в данном случае это излишне, так как нам достаточно узнать последние им€ и фамилию, но почему бы не использовать готовые функции?
+		const vector<string> first_names_history = FindFirstNamesHistory(year);
+		const vector<string> last_names_history = FindLastNamesHistory(year);
+
+		// подготовим данные дл€ функции BuildFullName: возьмЄм последние им€ и фамилию или оставим их пустыми, если они неизвестны
+		string first_name;
+		string last_name;
+		if (!first_names_history.empty()) {
+			first_name = first_names_history.back();
 		}
-		else if (first != history_first.rend() && last == history_last.rend()) {
-			return first->second + " with unknown last name";
+		if (!last_names_history.empty()) {
+			last_name = last_names_history.back();
 		}
-		else if (first == history_first.rend() && last != history_last.rend()) {
-			return last->second + " with unknown first name";
-		}
-		else {
-			return first->second + " " + last->second;
-		}
-}
+		return BuildFullName(first_name, last_name);
+	}
+
+	string GetFullNameWithHistory(int year) {
+		// получим полное им€ со всей историей
+		const string first_name = BuildJoinedName(FindFirstNamesHistory(year));
+		// получим полную фамилию со всей историей
+		const string last_name = BuildJoinedName(FindLastNamesHistory(year));
+		// объединим их с помощью готовой функции
+		return BuildFullName(first_name, last_name);
+	}
+
 private:
-	// приватные пол€
-	map<int, string> history_first;
-	map<int, string> history_last;
+	vector<string> FindFirstNamesHistory(int year) {
+		return FindNamesHistory(first_names, year);
+	}
+	vector<string> FindLastNamesHistory(int year) {
+		return FindNamesHistory(last_names, year);
+	}
+
+	map<int, string> first_names;
+	map<int, string> last_names;
 };
+
 
 
 int main()
@@ -61,18 +137,33 @@ int main()
 	person.ChangeFirstName(1965, "Polina");
 	person.ChangeLastName(1967, "Sergeeva");
 	for (int year : {1900, 1965, 1990}) {
-		cout << person.GetFullName(year) << endl;
+		cout << person.GetFullNameWithHistory(year) << endl;
 	}
 
 	person.ChangeFirstName(1970, "Appolinaria");
 	for (int year : {1969, 1970}) {
-		cout << person.GetFullName(year) << endl;
+		cout << person.GetFullNameWithHistory(year) << endl;
 	}
 
 	person.ChangeLastName(1968, "Volkova");
 	for (int year : {1969, 1970}) {
-		cout << person.GetFullName(year) << endl;
+		cout << person.GetFullNameWithHistory(year) << endl;
 	}
+
+	person.ChangeFirstName(1990, "Polina");
+	person.ChangeLastName(1990, "Volkova-Sergeeva");
+	cout << person.GetFullNameWithHistory(1990) << endl;
+
+	person.ChangeFirstName(1966, "Pauline");
+	cout << person.GetFullNameWithHistory(1966) << endl;
+
+	person.ChangeLastName(1960, "Sergeeva");
+	for (int year : {1960, 1967}) {
+		cout << person.GetFullNameWithHistory(year) << endl;
+	}
+
+	person.ChangeLastName(1961, "Ivanova");
+	cout << person.GetFullNameWithHistory(1967) << endl;
 
 #ifdef _MSC_VER
 	system("pause");
