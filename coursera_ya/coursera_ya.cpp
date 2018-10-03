@@ -11,19 +11,26 @@
 
 using namespace std;
 
+set<string> BuildMapValuesSet(const map<int, string>& m) {
+	set<string> s;
+	for (const auto& p : m)
+		s.insert(p.second);
+	return s;
+}
+
 int main()
 {
-	int num_q;
-	cin >> num_q;
+	set<string> values = BuildMapValuesSet({
+		{ 1, "odd" },
+		{ 2, "even" },
+		{ 3, "odd" },
+		{ 4, "even" },
+		{ 5, "odd" }
+	});
 
-	set<string> uniq_str;
-	for (int i = 0; i < num_q; i++) {
-		string s;
-		cin >> s;
-		uniq_str.insert(s);
+	for (const string& value : values) {
+		cout << value << endl;
 	}
-
-	cout << uniq_str.size() << endl;
 
 
 #ifdef _MSC_VER
