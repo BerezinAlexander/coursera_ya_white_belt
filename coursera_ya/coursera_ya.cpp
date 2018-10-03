@@ -16,30 +16,20 @@ int main()
 	int num_q;
 	cin >> num_q;
 
-	int count_bus = 0;
-	map<set<string>, int> buses; // <stops, num_bus>
+	vector<int> arr(num_q); 
 
 	for (int i = 0; i < num_q; i++) {
-		int count;
-		cin >> count;
-
-		set<string> stops;
-		for (int i = 0; i < count; i++) {
-			string stop;
-			cin >> stop;
-			stops.insert(stop);
-		}
-
-		if (buses.count(stops) == 0) {
-			buses[stops] = ++count_bus;
-			cout << "New bus ";
-		}
-		else {
-			cout << "Already exists for ";
-		}
-		cout << buses[stops] << endl;
+		cin >> arr[i];
 	}
 
+	sort(arr.begin(), arr.end(), 
+		[] (auto val1, auto val2) {
+			return abs(val1) < abs(val2);
+		});
+
+	for (auto val : arr)
+		cout << val << " ";
+	cout << endl;
 
 #ifdef _MSC_VER
 	system("pause");
