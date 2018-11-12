@@ -98,23 +98,11 @@ ostream& operator<<(ostream& stream, const Rational& rational) {
 }
 
 istream& operator>>(istream& stream, Rational& rational) {
-	if (!stream)
-		return stream;
-
-	if (stream.tellg() == (streampos)-1) {
-		return stream;
-	}
-
-	int a = 0;
-	int b = 1;
-	if (!stream.eof()) {
-		stream >> a;
-		if (!stream.eof()) {
-			stream.ignore(1);
-		}
-		if (stream >> b) {
-			rational = Rational(a, b);
-		}
+	int n, d;
+	char c;
+	stream >> n >> c >> d;
+	if (stream && c == '/') {
+		rational = Rational(n, d);
 	}
 	return stream;
 }
