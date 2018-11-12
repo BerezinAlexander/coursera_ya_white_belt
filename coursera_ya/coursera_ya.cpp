@@ -2,118 +2,59 @@
 //
 
 #include <iostream>
+#include <fstream>
 #include <string>
 #include <cmath>
 #include <set>
 #include <vector>
 #include <algorithm>
 #include <map>
+#include <iomanip>
 
 using namespace std;
 
-class FunctionParts {
-public:
-	FunctionParts(char new_operation, double new_value)
-		: operation(new_operation), value(new_value)
-	{}
-	double Apply(double source_value) const {
-		if (operation == '+') {
-			return source_value + value;
-		}
-		else if (operation == '-') {
-			return source_value - value;
-		}
-		else if (operation == '*') {
-			return source_value * value;
-		}
-		else if (operation == '/') {
-			return source_value / value;
-		}
-	}
-	void Invert() {
-		if (operation == '+') {
-			operation = '-';
-		}
-		else if (operation == '-') {
-			operation = '+';
-		}
-		else if (operation == '*') {
-			operation = '/';
-		}
-		else if (operation == '/') {
-			operation = '*';
-		}
-	}
-private:
-	char operation;
-	double value;
-};
+int main()
+{
+	ifstream input("input.txt");
 
-class Function {
-public:
-	void AddPart(const char operation, const double value) {
-		parts.emplace_back( operation, value );
+	if (!input) {
+		//cout << "File not open!" << endl;
+		return 0;
 	}
-	double Apply(double value) const {
-		for (auto& part : parts) {
-			value = part.Apply(value);
-		}
-		return value;
-	}
-	void Invert() {
-		for (auto& part : parts) {
-			part.Invert();
-		}
-		reverse(parts.begin(), parts.end());
-	}
-private:
-	vector<FunctionParts> parts;
-};
 
-//struct Image {
-//	double quality;
-//	double freshness;
-//	double rating;
-//};
-//
-//struct Params {
-//	double a;
-//	double b;
-//	double c;
-//};
-//
-//Function MakeWeightFunction(const Params& params,
-//	const Image& image) {
-//	Function function;
-//	function.AddPart('*', params.a);
-//	function.AddPart('-', image.freshness * params.b);
-//	function.AddPart('+', image.rating * params.c);
-//	return function;
-//}
-//
-//double ComputeImageWeight(const Params& params, const Image& image) {
-//	Function function = MakeWeightFunction(params, image);
-//	return function.Apply(image.quality);
-//}
-//
-//double ComputeQualityByWeight(const Params& params,
-//	const Image& image,
-//	double weight) {
-//	Function function = MakeWeightFunction(params, image);
-//	function.Invert();
-//	return function.Apply(weight);
-//}
-//
-//int main()
-//{
-//	Image image = { 10, 2, 6 };
-//	Params params = { 4, 2, 6 };
-//	cout << ComputeImageWeight(params, image) << endl;
-//	cout << ComputeQualityByWeight(params, image, 52) << endl;//
-//
-//#ifdef _MSC_VER
-//	system("pause");
-//#endif
-//
-//	return 0;
-//}
+	int n, m;
+
+	input >> n >> m;
+
+	vector<vector<int>> table;
+	table.resize(n);
+	for (auto& line : table) {
+		line.resize(m);
+	}
+
+	auto itLine = table.begin();
+	for (int i = 0; i < n; i++) {
+		for (int j = 0; j < m; j++) {
+			input >> (*itLine)[j];
+			if(j < m-1)
+				input.ignore(1);
+		}
+		itLine++;
+	}
+
+	for (auto it = table.begin(); it != table.end(); it++) {
+		for (auto itItem = it->begin(); itItem != it->end(); itItem++) {
+			if (itItem != it->begin())
+				cout << " ";
+			cout << setw(10) << *itItem;
+		}
+		if(it < prev( table.end() ) )
+			cout << endl;
+	}
+/*
+#ifdef _MSC_VER
+	system("pause");
+#endif*/
+
+	return 0;
+}
