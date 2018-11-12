@@ -115,22 +115,35 @@ istream& operator >> (istream& stream, Rational& rational) {
 
 int main() {
 	try {
-		Rational r(1, 0);
-		cout << "Doesn't throw in case of zero denominator" << endl;
-		return 1;
+		Rational r1, r2;
+		char oper;
+
+		cin >> r1 >> oper >> r2;
+
+		switch (oper) {
+		case '+':
+			cout << r1 + r2 << endl;
+			break;
+		case '-':
+			cout << r1 - r2 << endl;
+			break;
+		case '*':
+			cout << r1 * r2 << endl;
+			break;
+		case '/':
+			cout << r1 / r2 << endl;
+			break;
+		default:
+			break;
+		}
 	}
 	catch (invalid_argument&) {
-	}
-
-	try {
-		auto x = Rational(1, 2) / Rational(0, 1);
-		cout << "Doesn't throw in case of division by zero" << endl;
-		return 2;
+		cout << "Invalid argument" << endl;
 	}
 	catch (domain_error&) {
+		cout << "Division by zero" << endl;
 	}
 
-	cout << "OK" << endl;
 
 #ifdef _MSC_VER
 	system("pause");
