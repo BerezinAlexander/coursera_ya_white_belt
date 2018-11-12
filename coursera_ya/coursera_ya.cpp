@@ -13,44 +13,55 @@
 
 using namespace std;
 
+struct Student {
+	string firstName;
+	string lastName;
+	int day;
+	int month;
+	int year;
+};
+
 int main()
-{
-	ifstream input("input.txt");
-
-	if (!input) {
-		//cout << "File not open!" << endl;
-		return 0;
-	}
-
+{	
 	int n, m;
 
-	input >> n >> m;
+	cin >> n;
 
-	vector<vector<int>> table;
-	table.resize(n);
-	for (auto& line : table) {
-		line.resize(m);
-	}
+	vector<Student> students(n);
 
-	auto itLine = table.begin();
 	for (int i = 0; i < n; i++) {
-		for (int j = 0; j < m; j++) {
-			input >> (*itLine)[j];
-			if(j < m-1)
-				input.ignore(1);
-		}
-		itLine++;
+		Student& stud = students[i];
+		cin >> stud.firstName >> stud.lastName >> stud.day
+			>> stud.month >> stud.year;
 	}
 
-	for (auto it = table.begin(); it != table.end(); it++) {
-		for (auto itItem = it->begin(); itItem != it->end(); itItem++) {
-			if (itItem != it->begin())
-				cout << " ";
-			cout << setw(10) << *itItem;
+	cin >> m;
+
+	string req;
+	int num;
+	for (int i = 0; i < m; i++) {
+		cin >> req >> num;
+
+		if (num <= 0 || num > n) {
+			cout << "bad request" << endl;
+			continue;
 		}
-		if(it < prev( table.end() ) )
-			cout << endl;
+		
+		--num;
+
+		if (req == "name") {
+			cout << students[num].firstName << " " << students[num].lastName 
+				<< endl;
+		}
+		else if (req == "date") {
+			cout << students[num].day << "." << students[num].month << "." 
+				<< students[num].year << endl;
+		}
+		else {
+			cout << "bad request" << endl;
+		}
 	}
+
 /*
 #ifdef _MSC_VER
 	system("pause");
