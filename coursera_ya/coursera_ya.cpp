@@ -11,139 +11,115 @@
 #include <map>
 #include <iomanip>
 #include <sstream>
+#include <exception>
 
 using namespace std;
 
-class Rational {
+// Реализуйте функции и методы классов и при необходимости добавьте свои
+
+class Date {
 public:
-	Rational() : _numerator(0), _denominator(1) {};
-	Rational(int numerator, int denominator) {
-		if (denominator == 0)
-			throw invalid_argument("");
+	Date(int year_, int month_, int day_)
+		: year(year_), month(month_), day(day_)
+	{}
 
-		if (numerator == 0)
-			denominator = 1;
-
-		if (numerator < 0 && denominator < 0) {
-			numerator = abs(numerator);
-			denominator = abs(denominator);
-		}
-		else if (denominator < 0) {
-			numerator -= 2 * numerator;
-			denominator = abs(denominator);
-		}
-
-		int nod = NOD(numerator, denominator);
-		_numerator = numerator / nod;
-		_denominator = denominator / nod;
-	};
-
-	int Numerator() const { return _numerator; };
-	int Denominator() const { return _denominator; };
-
-private:
-	int _numerator, _denominator;
-
-	int NOD(int a_, int b_) {
-		// пока оба числа положительны, будем их уменьшать, не меняя их НОД
-		int a = abs(a_);
-		int b = abs(b_);
-
-		while (a > 0 && b > 0) {
-
-			// возьмём большее из чисел и заменим его остатком от деления на второе
-			// действительно, если a и b делятся на x, то a - b и b делятся на x
-			// тогда и a % b и b делятся на x, так что можно a заменить на a % b
-			if (a > b) {
-				a %= b;
-			}
-			else {
-				b %= a;
-			}
-
-		}
-
-		return a + b;
-	}
+	int GetYear() const;
+	int GetMonth() const;
+	int GetDay() const;
+	
+private: 
+	int year;
+	int month;
+	int day;
 };
 
-bool operator==(const Rational& lhs, const Rational& rhs) {
-	return (lhs.Numerator() == rhs.Numerator() && lhs.Denominator() == rhs.Denominator());
-}
-
-bool operator<(const Rational& lhs, const Rational& rhs) {
-	return lhs.Numerator() * rhs.Denominator() < rhs.Numerator()*lhs.Denominator();
-}
-
-bool operator>(const Rational& lhs, const Rational& rhs) {
-	return lhs.Numerator() * rhs.Denominator() > rhs.Numerator()*lhs.Denominator();
-}
-
-Rational operator+(const Rational& lhs, const Rational& rhs) {
-	return Rational(lhs.Numerator() * rhs.Denominator() + rhs.Numerator()*lhs.Denominator(), lhs.Denominator() * rhs.Denominator());
-}
-
-Rational operator-(const Rational& lhs, const Rational& rhs) {
-	return Rational(lhs.Numerator() * rhs.Denominator() - rhs.Numerator()*lhs.Denominator(), lhs.Denominator() * rhs.Denominator());
-}
-
-Rational operator*(const Rational& lhs, const Rational& rhs) {
-	return Rational(lhs.Numerator() * rhs.Numerator(), lhs.Denominator() * rhs.Denominator());
-}
-
-Rational operator/(const Rational& lhs, const Rational& rhs) {
-	if (rhs.Numerator() == 0)
-		throw domain_error("");
-
-	return Rational(lhs.Numerator() * rhs.Denominator(), lhs.Denominator() * rhs.Numerator());
-}
-
-ostream& operator<<(ostream& stream, const Rational& rational) {
-	stream << rational.Numerator() << "/" << rational.Denominator();
-	return stream;
-}
-
-istream& operator >> (istream& stream, Rational& rational) {
-	int n, d;
-	char c;
-	stream >> n >> c >> d;
-	if (stream && c == '/') {
-		rational = Rational(n, d);
+bool operator<(const Date& lhs, const Date& rhs) {
+	bool res = false;
+	if (lhs.GetYear() == rhs.GetYear()) {
+		if (lhs.GetMonth() == rhs.GetMonth()) {
+			if (lhs.GetDay() != rhs.GetDay()) {
+				res = lhs.GetDay() < rhs.GetDay();
+			}
+		}
+		else {
+			res = lhs.GetMonth() < rhs.GetMonth();
+		}
 	}
-	return stream;
+	else {
+		res = lhs.GetYear() < rhs.GetYear();
+	}
+	return res;
 }
+
+bool operator==(const Date& lhs, const Date& rhs) {
+	if (lhs.GetYear() == rhs.GetYear()) {
+		if (lhs.GetMonth() == rhs.GetMonth()) {
+			if (lhs.GetDay() == rhs.GetDay()) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+//istream& operator>>(istream& is, Date& d) {
+//	int y, m, day;
+//	char ch;
+//	is >> y;
+//	is >> ch;
+//
+//}
+
+class Database {
+public:
+	void AddEvent(const Date& date, const string& event);
+	bool DeleteEvent(const Date& date, const string& event);
+	int  DeleteDate(const Date& date) {
+		if (db.count(date) > 0) {
+			return db.erase(date); // delete all items!
+		}
+		return 0;
+	}
+
+	string Find(const Date& date) const {
+		if (db.count(date) > 0) {
+			return db.at(date);  
+		}
+		return "";
+	}
+
+	void Print() const {
+		for (auto& item : db) {
+			cout << item.first << " " << item.second << endl;
+		}
+	}
+private:
+	map<Date, string> db;
+};
 
 int main() {
-	try {
-		Rational r1, r2;
-		char oper;
+	Database db;
 
-		cin >> r1 >> oper >> r2;
+	string command;
+	while (getline(cin, command)) {
+		// Считайте команды с потока ввода и обработайте каждую
+		if (command == "Add") {
 
-		switch (oper) {
-		case '+':
-			cout << r1 + r2 << endl;
-			break;
-		case '-':
-			cout << r1 - r2 << endl;
-			break;
-		case '*':
-			cout << r1 * r2 << endl;
-			break;
-		case '/':
-			cout << r1 / r2 << endl;
-			break;
-		default:
+		}
+		else if (command == "Del") {
+
+		}
+		else if (command == "Find") {
+
+		}
+		else if (command == "Print") {
+
+		}
+		else {
+			cout << "Unknown command: COMMAND" << endl;
 			break;
 		}
 	}
-	catch (invalid_argument&) {
-		cout << "Invalid argument" << endl;
-	}
-	catch (domain_error&) {
-		cout << "Division by zero" << endl;
-	}
-
 
 #ifdef _MSC_VER
 	system("pause");
