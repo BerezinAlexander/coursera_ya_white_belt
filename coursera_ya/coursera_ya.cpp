@@ -27,54 +27,84 @@ public:
 	int GetMonth() const;
 	int GetDay() const;
 	
+	bool operator<(const Date& d) const  {
+		bool res = false;
+		if (year == d.GetYear()) {
+			if (month == d.GetMonth()) {
+				if (day != d.GetDay()) {
+					res = day < d.GetDay();
+				}
+			}
+			else {
+				res = month < d.GetMonth();
+			}
+		}
+		else {
+			res = year < d.GetYear();
+		}
+		return res;
+	}
+
+	//bool operator>(const Date& d) { return true; }
+	//bool operator<=(const Date& d) { return true; }
+	//bool operator>=(const Date& d) { return true; }
+	bool operator==(const Date& d) const  {
+		if (year == d.GetYear() && 
+			month == d.GetMonth() &&
+			day == d.GetDay()) 
+		{
+			return true;
+		}
+		return false;
+	}
+	bool operator!=(const Date& d) const {
+		if (year == d.GetYear() &&
+			month == d.GetMonth() &&
+			day == d.GetDay())
+		{
+			return false;
+		}
+		return true;
+	}
+
 private: 
 	int year;
 	int month;
 	int day;
 };
 
-bool operator<(const Date& lhs, const Date& rhs) {
-	bool res = false;
-	if (lhs.GetYear() == rhs.GetYear()) {
-		if (lhs.GetMonth() == rhs.GetMonth()) {
-			if (lhs.GetDay() != rhs.GetDay()) {
-				res = lhs.GetDay() < rhs.GetDay();
-			}
-		}
-		else {
-			res = lhs.GetMonth() < rhs.GetMonth();
-		}
-	}
-	else {
-		res = lhs.GetYear() < rhs.GetYear();
-	}
-	return res;
+ostream& operator<<(ostream& os, const Date& d) {
+	os << d.GetYear() << "-" << d.GetMonth() << "-"
+		<< d.GetDay;
+	return os;
 }
 
-bool operator==(const Date& lhs, const Date& rhs) {
-	if (lhs.GetYear() == rhs.GetYear()) {
-		if (lhs.GetMonth() == rhs.GetMonth()) {
-			if (lhs.GetDay() == rhs.GetDay()) {
-				return true;
-			}
-		}
-	}
-	return false;
+istream& operator>>(istream& is, Date& d) {
+	int y, m, day;
+	char ch;
+	is >> y;
+	is >> ch;
+	is >> m;
+	is >> ch;
+	is >> day;
+	return is;
 }
-
-//istream& operator>>(istream& is, Date& d) {
-//	int y, m, day;
-//	char ch;
-//	is >> y;
-//	is >> ch;
-//
-//}
 
 class Database {
 public:
-	void AddEvent(const Date& date, const string& event);
-	bool DeleteEvent(const Date& date, const string& event);
-	int  DeleteDate(const Date& date) {
+	void AddEvent(const Date& date, const string& event) {
+		db.insert({date, event});
+	}
+
+	bool DeleteEvent(const Date& date, const string& event) {
+		auto it = find_if(db.begin(), db.end(), [](const auto& pair) {
+			return pair.first == date && pair.second == event; });
+		if (it != db.end()) {
+			db.erase(it);
+		}
+	}
+
+	size_t  DeleteDate(const Date& date) {
 		if (db.count(date) > 0) {
 			return db.erase(date); // delete all items!
 		}
@@ -83,18 +113,18 @@ public:
 
 	string Find(const Date& date) const {
 		if (db.count(date) > 0) {
-			return db.at(date);  
+			//return db.at(date);  
 		}
 		return "";
 	}
 
 	void Print() const {
 		for (auto& item : db) {
-			cout << item.first << " " << item.second << endl;
+			//cout << item.first << " " << item.second << endl;
 		}
 	}
 private:
-	map<Date, string> db;
+	multimap<Date, string> db;
 };
 
 int main() {
@@ -121,9 +151,9 @@ int main() {
 		}
 	}
 
-#ifdef _MSC_VER
-	system("pause");
-#endif
+//#ifdef _MSC_VER
+//	system("pause");
+//#endif
 
 	return 0;
 }
