@@ -19,6 +19,9 @@ using namespace std;
 
 class Date {
 public:
+	Date() : year(1), month(1), day(1) 
+	{}
+
 	Date(int year_, int month_, int day_)
 		: year(year_)
 	{
@@ -108,6 +111,13 @@ istream& operator>>(istream& is, Date& d) {
 	string err = "Wrong date format: " + line;
 	if(line.empty())
 		throw runtime_error(err);
+	
+	set<char> numsimbols = { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '-' };
+	for (char c : line) {
+		if (numsimbols.count(c) == 0) {
+			throw runtime_error(err);
+		}
+	}
 
 	ss << line;
 	int year = -1, month = -1, day = -1;
@@ -132,12 +142,18 @@ istream& operator>>(istream& is, Date& d) {
 
 class Database {
 public:
+	Database() = default;
+	~Database() = default;
+
 	void AddEvent(const Date& date, const string& event) {
 		if (!event.empty()) {
 			auto it = find_if(db.begin(), db.end(), [&date, &event](const auto& pair) {
 				return pair.first == date && pair.second == event; });
 			if (it == db.end())
 				db.emplace(date, event);
+		}
+		else {
+			throw runtime_error("");
 		}
 	}
 
@@ -212,8 +228,6 @@ int main() {
 		Database db;
 
 		string command;
-		Date date(1, 1, 1);
-		string event = "";
 		while (getline(cin, command)) {
 			// Считайте команды с потока ввода и обработайте каждую
 			if (command.empty() || command == " ")
@@ -221,34 +235,52 @@ int main() {
 
 			stringstream ss;
 			ss << command;
-
 			string com;
 			ss >> com;
 
-
-			//string com = command;
-			//size_t pos_beg = 0;
-			//size_t pos_end = command.find(' ');
-			//if(pos_end == string::npos)
-			//	com = command.substr(pos_beg, pos_end);
-
-			if (com == "Add") {
+			// print all events
+			if (com == "Print") {
+				db.Print();
+				continue;
+			}
+			else if (com == "Add" || com == "Del" || com == "Find") {
 				try {
-					event = "";
-					
 					// парсинг даты
+					Date date;
 					string sdata;
 					ss >> sdata;
 					stringstream ss2;
 					ss2 << sdata;
 					ss2 >> date;
-					
+
+					// event
+					string event = "";
 					ss >> event;
 
-					if (!(event.empty() || event == " "))
-						db.AddEvent(date, event);
-					else
+					if (com == "Add") {
+						if (!(event.empty() || event == " "))
+							db.AddEvent(date, event);
+						else
+							throw runtime_error("");
+					}
+					else if(com == "Find") {
+						db.Find(date);
+					}
+					else if (com == "Del") {
+						if (event.empty()) {
+							int num = db.DeleteDate(date);
+							cout << "Deleted " << num << " events" << endl;
+						}
+						else {
+							if (db.DeleteEvent(date, event))
+								cout << "Deleted successfully" << endl;
+							else
+								cout << "Event not found" << endl;
+						}
+					}
+					else {
 						throw runtime_error("");
+					}
 				}
 				catch (invalid_argument& er) {
 					cout << er.what() << endl;
@@ -265,70 +297,107 @@ int main() {
 					break;
 				}
 			}
-			else if (com == "Del") {
-				try {
-					event = "";
-
-					// парсинг даты
-					string sdata;
-					ss >> sdata;
-					stringstream ss2;
-					ss2 << sdata;
-					ss2 >> date;
-
-					ss >> event;
-					if (event.empty()) {
-						int num = db.DeleteDate(date);
-						cout << "Deleted " << num << " events" << endl;
-					}
-					else {
-						if (db.DeleteEvent(date, event))
-							cout << "Deleted successfully" << endl;
-						else
-							cout << "Event not found" << endl;
-					}
-				}
-				catch (...) {
-					stringstream ss;
-					ss << command;
-					string com;
-					ss >> com;
-					string sdate;
-					ss >> sdate;
-					cout << "Wrong date format: " << sdate << endl;
-					break;
-				}
-			}
-			else if (com == "Find") {
-				try {
-					// парсинг даты
-					string sdata;
-					ss >> sdata;
-					stringstream ss2;
-					ss2 << sdata;
-					ss2 >> date;
-
-					db.Find(date);
-					//cout << db.Find(date) << endl;
-				}
-				catch (...) {
-					stringstream ss;
-					ss << command;
-					string com;
-					ss >> com;
-					string sdate;
-					ss >> sdate;
-					cout << "Wrong date format: " << sdate << endl;
-					break;
-				}
-			}
-			else if (com == "Print") {
-				db.Print();
-			}
 			else {
 				cout << "Unknown command: " << com << endl;
 				return 0;
 			}
+
+			//Date date;
+			//string event = "";
+			//if (com == "Add") {
+			//	try {
+			//		event = "";
+			//		
+			//		// парсинг даты
+			//		string sdata;
+			//		ss >> sdata;
+			//		stringstream ss2;
+			//		ss2 << sdata;
+			//		ss2 >> date;
+			//		
+			//		ss >> event;
+			//
+			//		if (!(event.empty() || event == " "))
+			//			db.AddEvent(date, event);
+			//		else
+			//			throw runtime_error("");
+			//	}
+			//	catch (invalid_argument& er) {
+			//		cout << er.what() << endl;
+			//		break;
+			//	}
+			//	catch (...) {
+			//		stringstream ss;
+			//		ss << command;
+			//		string com;
+			//		ss >> com;
+			//		string sdate;
+			//		ss >> sdate;
+			//		cout << "Wrong date format: " << sdate << endl;
+			//		break;
+			//	}
+			//}
+			//else if (com == "Del") {
+			//	try {
+			//		event = "";
+			//
+			//		// парсинг даты
+			//		string sdata;
+			//		ss >> sdata;
+			//		stringstream ss2;
+			//		ss2 << sdata;
+			//		ss2 >> date;
+			//
+			//		ss >> event;
+			//		if (event.empty()) {
+			//			int num = db.DeleteDate(date);
+			//			cout << "Deleted " << num << " events" << endl;
+			//		}
+			//		else {
+			//			if (db.DeleteEvent(date, event))
+			//				cout << "Deleted successfully" << endl;
+			//			else
+			//				cout << "Event not found" << endl;
+			//		}
+			//	}
+			//	catch (...) {
+			//		stringstream ss;
+			//		ss << command;
+			//		string com;
+			//		ss >> com;
+			//		string sdate;
+			//		ss >> sdate;
+			//		cout << "Wrong date format: " << sdate << endl;
+			//		break;
+			//	}
+			//}
+			//else if (com == "Find") {
+			//	try {
+			//		// парсинг даты
+			//		string sdata;
+			//		ss >> sdata;
+			//		stringstream ss2;
+			//		ss2 << sdata;
+			//		ss2 >> date;
+			//
+			//		db.Find(date);
+			//		//cout << db.Find(date) << endl;
+			//	}
+			//	catch (...) {
+			//		stringstream ss;
+			//		ss << command;
+			//		string com;
+			//		ss >> com;
+			//		string sdate;
+			//		ss >> sdate;
+			//		cout << "Wrong date format: " << sdate << endl;
+			//		break;
+			//	}
+			//}
+			//else {
+			//	cout << "Unknown command: " << com << endl;
+			//	return 0;
+			//}
 		}
 	}
 	catch (...) {
