@@ -213,7 +213,7 @@ int main() {
 
 		string command;
 		Date date(1, 1, 1);
-		string event;
+		string event = "";
 		while (getline(cin, command)) {
 			// —читайте команды с потока ввода и обработайте каждую
 			if (command.empty() || command == " ")
@@ -235,15 +235,24 @@ int main() {
 			if (com == "Add") {
 				try {
 					event = "";
-					ss >> date;
+					
+					// парсинг даты
+					string sdata;
+					ss >> sdata;
+					stringstream ss2;
+					ss2 << sdata;
+					ss2 >> date;
+					
 					ss >> event;
 
-					if(!(event.empty() || event == " "))
+					if (!(event.empty() || event == " "))
 						db.AddEvent(date, event);
+					else
+						throw runtime_error("");
 				}
 				catch (invalid_argument& er) {
 					cout << er.what() << endl;
-					//break;
+					break;
 				}
 				catch (...) {
 					stringstream ss;
@@ -253,16 +262,24 @@ int main() {
 					string sdate;
 					ss >> sdate;
 					cout << "Wrong date format: " << sdate << endl;
-					//break;
+					break;
 				}
 			}
 			else if (com == "Del") {
 				try {
 					event = "";
-					ss >> date >> event;
-					bool res = false;
+
+					// парсинг даты
+					string sdata;
+					ss >> sdata;
+					stringstream ss2;
+					ss2 << sdata;
+					ss2 >> date;
+
+					ss >> event;
 					if (event.empty()) {
-						cout << "Deleted " << db.DeleteDate(date) << " events" << endl;
+						int num = db.DeleteDate(date);
+						cout << "Deleted " << num << " events" << endl;
 					}
 					else {
 						if (db.DeleteEvent(date, event))
@@ -279,12 +296,18 @@ int main() {
 					string sdate;
 					ss >> sdate;
 					cout << "Wrong date format: " << sdate << endl;
-					//break;
+					break;
 				}
 			}
 			else if (com == "Find") {
 				try {
-					ss >> date;
+					// парсинг даты
+					string sdata;
+					ss >> sdata;
+					stringstream ss2;
+					ss2 << sdata;
+					ss2 >> date;
+
 					db.Find(date);
 					//cout << db.Find(date) << endl;
 				}
@@ -296,7 +319,7 @@ int main() {
 					string sdate;
 					ss >> sdate;
 					cout << "Wrong date format: " << sdate << endl;
-					//break;
+					break;
 				}
 			}
 			else if (com == "Print") {
@@ -304,7 +327,7 @@ int main() {
 			}
 			else {
 				cout << "Unknown command: " << com << endl;
-				//return 0;
+				return 0;
 			}
 		}
 	}
