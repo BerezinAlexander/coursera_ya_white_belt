@@ -11,16 +11,30 @@
 
 using namespace std;
 
+map<int, string>::iterator BinarySearcher(map<int, string>::iterator& itBeg, 
+	map<int, string>::iterator& itEnd, const int year) 
+{
+	auto itFind = next(itBeg, (distance(itBeg, itEnd)) / 2);
+	if()
+}
+
 string FindName(const map<int, string>& history, const int year)
 {
-	auto rIt = find_if( history.rbegin(), history.rend(),
-						[&year](const auto& p) {
-							return p.first <= year;
-						}
-	);
-	string result;
-	if (rIt != history.rend())
-		result = rIt->second;
+	// binary finder
+	auto itFind = next(history.begin(), history.size() / 2);
+
+
+	// basic finder
+	//auto rIt = find_if( history.rbegin(), history.rend(),
+	//					[&year](const auto& p) {
+	//						return p.first <= year;
+	//					}
+	//);
+	//string result;
+	//if (rIt != history.rend())
+	//	result = rIt->second;
+
+
 	return result;
 }
 
@@ -77,6 +91,7 @@ string FormationResult(const string& first_name, const string& last_name)
 
 class Person {
 public:
+	Person() = default;
 	Person(const string& fname, const string& lname, const int year) 
 		: birthYear(year)
 	{
@@ -131,24 +146,27 @@ private:
 
 int main()
 {
-	Person person("Polina", "Sergeeva", 1960);
-	for (int year : {1959, 1960}) {
-		cout << person.GetFullNameWithHistory(year) << endl;
+	Person person;
+
+	person.ChangeFirstName(1965, "Polina");
+	person.ChangeLastName(1967, "Sergeeva");
+	for (int year : {1900, 1965, 1990}) {
+		cout << person.GetFullName(year) << endl;
 	}
 
-	person.ChangeFirstName(1965, "Appolinaria");
-	person.ChangeLastName(1967, "Ivanova");
-	for (int year : {1965, 1967}) {
-		cout << person.GetFullNameWithHistory(year) << endl;
+	person.ChangeFirstName(1970, "Appolinaria");
+	for (int year : {1969, 1970}) {
+		cout << person.GetFullName(year) << endl;
 	}
 
+	person.ChangeLastName(1968, "Volkova");
+	for (int year : {1969, 1970}) {
+		cout << person.GetFullName(year) << endl;
+	}
 
-	person.ChangeLastName(1961, "Ivanova");
-	cout << person.GetFullNameWithHistory(1967) << endl;
-
-#ifdef _MSC_VER
-	system("pause");
-#endif
+//#ifdef _MSC_VER
+//	system("pause");
+//#endif
 
 	return 0;
 }
