@@ -43,13 +43,26 @@ int main()
 	size_t count = 0;
 
 	string post = ") + ";
+	string post2 = " + ";
 	string str = to_string(val);
 
+	bool need = false;
+
 	for (int i = 0; i < n; ++i) {
-		cin >> c >> cur_val;
-		post[2] = c;
-		++count;
-		str.insert(str.length(), post);
+		cin >> c >> cur_val;		
+
+		if (need && (c == '*' || c == '/')) {
+			need = false;
+			++count;
+			post[2] = c;
+			str.insert(str.length(), post);
+		}
+		else {
+			if(c == '-' || c == '+')
+				need = true;
+			post2[1] = c;
+			str.insert(str.length(), post2);
+		}
 		str.insert(str.length(), to_string(cur_val));
 	}
 	
