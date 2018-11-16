@@ -1,129 +1,98 @@
-#include <iostream>
-#include <string>
-#include <cmath>
-#include <set>
-#include <vector>
-#include <algorithm>
-#include <map>
-#include <sstream>
-#include <chrono>
-#include <numeric>
-#include <deque>
-#include <memory>
-#include <iomanip>
+//#include "test_runner.h"
 
-////#include "LogDuration.h"
+#include <string>
+#include <vector>
+#include <iostream>
 
 using namespace std;
-//using namespace std::chrono;
 
-class Figure {
+
+class Person {
 public:
-	virtual string Name() = 0;
-	virtual double Perimeter() = 0;
-	virtual double Area() = 0;
+	explicit Person(const string &n, const string &t) : name(n), type(t) {}
+
+	virtual void Walk(const string &destination) const {
+		cout << type << ": " << name << " walks to: " << destination << endl;
+	};
+
+	string Log() const {
+		return type + ": " + name;
+	}
+
+	string GetName() const {
+		return name;
+	}
+
+	string GetType() const {
+		return type;
+	}
+
+protected:
+	const string name;
+	const string type;
 };
 
-class Triangle : public Figure {
+class Student : public Person {
 public:
-	Triangle(int a_, int b_, int c_)
-		: a(a_), b(b_), c(c_)
-	{}
-	string Name() override {
-		return "TRIANGLE";
+	explicit Student(const string &name, const string &favouriteSong) : Person(name, "Student"), FavouriteSong(favouriteSong) {}
+
+	void Learn() const {
+		cout << Log() << " learns" << endl;
 	}
-	double Perimeter() override {
-		return a + b + c;
+
+	void Walk(const string &destination) const override {
+		cout << Log() << " walks to: " << destination << endl;
+		cout << Log() << " sings a song: " << FavouriteSong << endl;
 	}
-	double Area() override {
-		double p = Perimeter() / 2;
-		return sqrt(p*(p - a)*(p - b)*(p - c));
+
+	void SingSong() const {
+		cout << Log() << " sings a song: " << FavouriteSong << endl;
 	}
+
 private:
-	int a, b, c;
+	const string FavouriteSong;
 };
 
-class Rect : public Figure {
+class Teacher : public Person {
 public:
-	Rect(int a_, int b_)
-		: a(a_), b(b_)
-	{}
-	string Name() override {
-		return "RECT";
+	explicit Teacher(const string &name, string &subject) : Person(name, "Teacher"), Subject(subject) {}
+
+	void Teach() const {
+		cout << Log() << " teaches: " << Subject << endl;
 	}
-	double Perimeter() override {
-		return 2 * a + 2 * b;
-	}
-	double Area() override {
-		return a*b;
-	}
+
 private:
-	int a, b;
+	const string Subject;
 };
 
-class Circle : public Figure {
+class Policeman : Person {
 public:
-	Circle(int r_)
-		: r(r_)
-	{}
-	string Name() override {
-		return "CIRCLE";
+	explicit Policeman(const string &name) : Person(name, "Policeman") {}
+
+	void Check(const Person &t) const {
+		cout << Log() << " checks " << t.GetType() << ". " << t.GetType() << "'s name is: "
+			<< t.GetName() << endl;
 	}
-	double Perimeter() override {
-		return 2.*3.14*r;
-	}
-	double Area() override {
-		return 3.14*r*r;
-	}
-private:
-	int r;
 };
 
-shared_ptr<Figure> CreateFigure(istream& is) {
-	string type;
-	is >> type;
-	if (type == "TRIANGLE") {
-		int a, b, c;
-		is >> a >> b >> c;
-		return shared_ptr<Figure>(new Triangle(a, b, c));
-	}
-	else if (type == "RECT") {
-		int a, b;
-		is >> a >> b;
-		return shared_ptr<Figure>(new Rect(a, b));
-	}
-	else if (type == "CIRCLE") {
-		int a;
-		is >> a;
-		return shared_ptr<Figure>(new Circle(a));
-	}
 
-	return shared_ptr<Figure>();
+void VisitPlaces(const Person &person, vector<string> places) {
+	for (const auto &p : places) {
+		person.Walk(p);
+	}
 }
 
+
 int main() {
-	vector<shared_ptr<Figure>> figures;
-	for (string line; getline(cin, line); ) {
-		istringstream is(line);
+	string teacher_name = "Matt", student_name = "Ann", policeman_name = "Bob";
+	string subject = "Math", song = "We will rock you";
+	Teacher t(teacher_name, subject);
+	Student s(student_name, song);
+	Policeman p(policeman_name);
+	vector<string> places = { "Moscow", "London" };
 
-		string command;
-		is >> command;
-		if (command == "ADD") {
-			figures.push_back(CreateFigure(is));
-		}
-		else if (command == "PRINT") {
-			for (const auto& current_figure : figures) {
-				cout << fixed << setprecision(3)
-					<< current_figure->Name() << " "
-					<< current_figure->Perimeter() << " "
-					<< current_figure->Area() << endl;
-			}
-		}
-	}
-
-#ifdef _MSC_VER
-	system("pause");
-#endif
-
+	VisitPlaces(t, places);
+	p.Check(s);
+	VisitPlaces(s, places);
 	return 0;
 }
