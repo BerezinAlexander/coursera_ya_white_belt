@@ -1,60 +1,74 @@
-// coursera_ya.cpp: определ€ет точку входа дл€ консольного приложени€.
+//#include <iostream>
+//#include <string>
+////#include <cmath>
+////#include <set>
+////#include <vector>
+////#include <algorithm>
+////#include <map>
+////#include <sstream>
+////#include <chrono>
+////#include <numeric>
+////#include <deque>
+////
+//////#include "LogDuration.h"
+////
+//using namespace std;
+//////using namespace std::chrono;
 //
+//void SendSms(const string& number, const string& message) {
+//	cout << "Send '" << message << "' to number " << number << endl;
+//}
+//
+//void SendEmail(const string& email, const string& message) {
+//	cout << "Send '" << message << "' to e-mail " << email << endl;
+//}
 
-#include <iostream>
-#include <string>
-#include <cmath>
-#include <set>
-#include <vector>
-#include <algorithm>
-#include <map>
-#include <sstream>
-#include <chrono>
-#include <numeric>
-#include <deque>
 
-//#include "LogDuration.h"
-
-using namespace std;
-//using namespace std::chrono;
-
-// ќпределим структуру дл€ удобной организации данных
-struct Operation {
-	// ѕараметры по умолчанию нужны дл€ конструировани€ вектора
-	// ненулевого размера (*)
-	char type = 0;
-	int number = 0;
+class INotifier {
+public:
+	virtual void Notify(const string& message) = 0;
 };
 
-int main() {
-	int initial_number;
-	cin >> initial_number;
-
-	int number_of_operations;
-	cin >> number_of_operations;
-	vector<Operation> operations(number_of_operations);  // (*)
-	for (int i = 0; i < number_of_operations; ++i) {
-		cin >> operations[i].type;
-		cin >> operations[i].number;
+class SmsNotifier : public INotifier {
+public:
+	SmsNotifier(const string& number_)
+		: number(number_)
+	{}
+	void Notify(const string& message) override {
+		SendSms(number, message);
 	}
 
-	deque<string> expression;
-	expression.push_back(to_string(initial_number));
-	for (const auto& operation : operations) {
-		expression.push_front("(");
-		expression.push_back(") ");
-		expression.push_back(string(1, operation.type));
-		expression.push_back(" ");
-		expression.push_back(to_string(operation.number));
+private:
+	string number;
+};
+
+class EmailNotifier : public INotifier {
+public:
+	EmailNotifier(const string& emale_)
+		: emale(emale_)
+	{}
+	void Notify(const string& message) override {
+		SendEmail(emale, message);
 	}
 
-	for (const string& s : expression) {
-		cout << s;
-	}
+private:
+	string emale;
+};
 
-#ifdef _MSC_VER
-	system("pause");
-#endif
-
-	return 0;
-}
+//void Notify(INotifier& notifier, const string& message) {
+//	notifier.Notify(message);
+//}
+//
+//int main() {
+//	SmsNotifier sms{ "+7-495-777-77-77" };
+//	EmailNotifier email{ "na-derevnyu@dedushke.ru" };
+//
+//	Notify(sms, "I have White belt in C++");
+//	Notify(email, "And want a Yellow one");
+//
+//#ifdef _MSC_VER
+//	system("pause");
+//#endif
+//
+//	return 0;
+//}
