@@ -21,6 +21,10 @@
   <ItemGroup>
     <ClCompile Include="..\coursera_ya\coursera_ya.cpp" />
   </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\coursera_ya\airline_ticket.h" />
+    <ClInclude Include="..\coursera_ya\test_runner.h" />
+  </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{105DADB7-F716-4B15-8061-2E4C95E3C4B7}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>
