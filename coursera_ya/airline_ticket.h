@@ -1,16 +1,27 @@
 #pragma once
 
 #include <string>
-#include <vector>
 using namespace std;
 
 struct Date {
 	int year, month, day;
-};
 
+	//Date& operator=(const Date& rhs) {
+	//	year = rhs.year;
+	//	month = rhs.month;
+	//	day = rhs.day;
+	//	return *this;
+	//}
+};
 
 struct Time {
 	int hours, minutes;
+
+	//Time& operator=(const Time& rhs) {
+	//	hours = rhs.hours;
+	//	minutes = rhs.minutes;
+	//	return *this;
+	//}
 };
 
 struct AirlineTicket {
