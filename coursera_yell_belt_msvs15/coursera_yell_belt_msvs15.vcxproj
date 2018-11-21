@@ -22,7 +22,6 @@
     <ClCompile Include="..\coursera_ya\coursera_ya.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\coursera_ya\airline_ticket.h" />
     <ClInclude Include="..\coursera_ya\test_runner.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
