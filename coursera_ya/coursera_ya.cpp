@@ -4,19 +4,21 @@
 #include <algorithm>
 #include <numeric>
 #include <ostream>
+#include <string>
+#include <vector>
 
 using namespace std;
 
 
-#define PRINT_VALUES(out, x, y) ((out) << (x) << endl << (y) << endl)
+#define CAT2(a,b) a##b
+#define CAT(a, b) CAT2(a,b)
+#define UNIQ_ID CAT(param_, __LINE__) 
 
 int main() {
-	TestRunner tr;
-	tr.RunTest([] {
-		ostringstream output;
-		PRINT_VALUES(output, 5, "red belt");
-		ASSERT_EQUAL(output.str(), "5\nred belt\n");
-	}, "PRINT_VALUES usage example");
+	int UNIQ_ID = 0;
+	string UNIQ_ID = "hello";
+	vector<string> UNIQ_ID = { "hello", "world" };
+	vector<int> UNIQ_ID = { 1, 2, 3, 4 };
 
 #ifdef _MSC_VER
 	system("pause");
