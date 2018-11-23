@@ -47,35 +47,26 @@ template <typename Iterator>
 class Paginator {
 public:
 	Paginator(Iterator begin, Iterator end, size_t page_size) {
-		size_t count = 0;
-		Iterator first = begin;
-		auto it = begin;
-		while (true) {
-			if (count == page_size || it == end) {
-				pages.emplace_back(MakeRange(first, it));
-				count = 1;
-				first = it;
-			}
-			else {
-				++count;
-			}
+		if (begin != end) {
+			size_t count = 0;
+			Iterator first = begin;
+			auto it = begin;
+			while (true) {
+				if (count == page_size || it == end) {
+					pages.emplace_back(MakeRange(first, it));
+					count = 1;
+					first = it;
+				}
+				else {
+					++count;
+				}
 
-			if (it == end)
-				break;
+				if (it == end)
+					break;
 
-			++it;
+				++it;
+			}
 		}
-
-		//for (auto it = begin; it != end; ++it) {
-		//	if (count == page_size || it == prev(end)) {
-		//		pages.emplace_back(MakeRange(first, it));
-		//		count = 1;
-		//		first = it;
-		//	}
-		//	else {
-		//		++count;
-		//	}
-		//}
 	}
 
 	auto begin() const {
@@ -192,10 +183,33 @@ void TestPagePagination() {
 	ASSERT_EQUAL(lines, expected);
 }
 
-int main() {
+class Application {
+public:
+	Application() = default;
+private:
+	const int value = 4;
+};
 
-	//vector<int> vec{ 1,2,3,4,5 };
-	//vector<int> vec2(vec.begin(), vec.begin()+2);
+vector<vector<Application>> DistributeAmongScreens(const vector<Application>& apps) {
+	vector<vector<Application>> result;
+	for (const auto& page : Paginate(apps, 20)) {
+		result.push_back({ page.begin(), page.end() });
+	}
+	// result[0] - все приложения, которые попадают на первый экран,
+	// result[1] - все приложения, которые попадают на второй экран и т.д.
+	return result;
+}
+
+int main() {
+	//vector<Application> vec;
+	//for (int i = 0; i < 415; ++i) {
+	//	vec.emplace_back(Application());
+	//}
+
+	//vector<vector<Application>> res = DistributeAmongScreens(vec);
+
+	//cout << res.size() << " " << res.front().size() << " " << res.back().size() << endl;
+
 
 
 
