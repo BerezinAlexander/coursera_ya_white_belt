@@ -7,83 +7,63 @@
 #include <numeric>
 #include <map>
 #include <algorithm>
+#include <set>
 
-#include "student.h"
+//#include "LogDuration.h"
 
 using namespace std;
 
-//struct Student {
-//	string first_name;
-//	string last_name;
-//	map<string, double> marks;
-//	double rating;
-//
-//	bool operator < (const Student& other) const {
-//		return GetName() < other.GetName();
-//	}
-//
-//	bool Less(const Student& other) const {
-//		return rating > other.rating;
-//	}
-//
-//	string GetName() const {
-//		return first_name + " " + last_name;
-//	}
-//};
+class Learner {
+private:
+	set<string> dict;
 
-bool Compare(const Student& first, const Student& second) {
-	return first.Less(second);
-}
+public:
+	int Learn(const vector<string>& words) {
+		//LOG_DURATION("Learn: ");
+		int newWords = 0;
+		for (const auto& word : words) {
+			if (dict.count(word) == 0) {
+				dict.insert(word);
+				++newWords;
+			}
+		}
+		return newWords;
+	}
 
-void TestComparison() {
-	Student newbie{
-	  "Ivan", "Ivanov", {
-		{"c++", 1.0},
-		{"algorithms", 3.0}
-	  },
-	  2.0
-	};
+	vector<string> KnownWords() {
+		//LOG_DURATION("KnownWords: ");
+		//sort(dict.begin(), dict.end());
+		//dict.erase(unique(dict.begin(), dict.end()), dict.end());
+		
+		vector<string> result;
+		for (const auto& word : dict) {
+			result.emplace_back(word);
+		}
 
-	Student cpp_expert{
-	  "Petr", "Petrov", {
-		{"c++", 9.5},
-		{"algorithms", 6.0}
-	  },
-	  7.75
-	};
-
-	Student guru{
-	  "Sidor", "Sidorov", {
-		{"c++", 10.0},
-		{"algorithms", 10.0}
-	  },
-	  10.0
-	};
-	ASSERT(Compare(guru, newbie));
-	ASSERT(Compare(guru, cpp_expert));
-	ASSERT(!Compare(newbie, cpp_expert));
-}
-
-void TestSorting() {
-	vector<Student> students{
-	  {"Sidor", "Sidorov", {{"maths", 2.}}, 2.},
-	  {"Semen", "Semenov", {{"maths", 4.}}, 4.},
-	  {"Ivan", "Ivanov", {{"maths", 5.}}, 5.},
-	  {"Petr", "Petrov", {{"maths", 3.}}, 3.},
-	  {"Alexander", "Alexandrov", {{"maths", 1.}}, 1.}
-	};
-	sort(students.begin(), students.end(), Compare);
-	ASSERT(is_sorted(students.begin(), students.end(),
-		[](Student first, Student second) {
-		return first.Less(second);
-	})
-	);
-}
+		return result;
+	}
+};
 
 int main() {
-	TestRunner tr;
-	RUN_TEST(tr, TestComparison);
-	RUN_TEST(tr, TestSorting);
+	Learner learner;
+	string line;
+	while (getline(cin, line)) {
+		vector<string> words;
+		stringstream ss(line);
+		string word;
+		while (ss >> word) {
+			//if(word == "exit")
+			//	break;
+			words.push_back(word);
+		}
+		//if (word == "exit")
+		//	break;
+		cout << learner.Learn(words) << "\n";
+	}
+	cout << "=== known words ===\n";
+	for (auto word : learner.KnownWords()) {
+		cout << word << "\n";
+	}
 
 
 #ifdef _MSC_VER
