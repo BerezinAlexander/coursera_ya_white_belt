@@ -19,8 +19,8 @@ public:
     auto finish = steady_clock::now();
     auto dur = finish - start;
     cout << message
-       << duration_cast<microseconds>(dur).count()
-       << " mcs" << endl;
+       << duration_cast<milliseconds>(dur).count()
+       << " ms" << endl;
   }
 private:
   string message;
