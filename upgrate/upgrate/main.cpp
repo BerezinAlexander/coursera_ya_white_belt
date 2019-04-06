@@ -1,59 +1,62 @@
-//#include "test_runner.h"
-
-#include <iostream>
-#include <string>
-#include <vector>
-#include <exception>
-#include <numeric>
-#include <map>
-#include <algorithm>
-#include <set>
 #include <iomanip>
+#include <iostream>
+#include <vector>
 #include <utility>
-
-//#include "LogDuration.h"
+#include <map>
 
 using namespace std;
 
 class ReadingManager {
 public:
 	ReadingManager()
-	{		
-		pages_u.resize(1001);
-		for (int i = 0; i < 1001; ++i)
-			pages_u[i] = 0;
-	}
+		// -1 значит, что не случилось ни одного READ
+		: user_page_counts_(MAX_USER_COUNT_ + 1, -1),
+		page_achieved_by_count_(MAX_PAGE_COUNT_ + 1, 0) {}
 
 	void Read(int user_id, int page_count) {
-		if (users.count(user_id) != 0) {
-			--pages_u[users[user_id]];
-		}
-
-		users[user_id] = page_count;
-		++pages_u[page_count];
+		UpdatePageRange(user_page_counts_[user_id] + 1, page_count + 1);
+		user_page_counts_[user_id] = page_count;
 	}
 
 	double Cheer(int user_id) const {
-		if (users.count(user_id) == 0)
+		const int pages_count = user_page_counts_[user_id];
+		if (pages_count == -1) {
 			return 0;
-
-		if (users.size() == 1)
-			return 1;
-
-		int count_users = 0;
-		int page = users.at(user_id);
-		for (int i = 0; i < page; ++i) {
-			count_users += pages_u[i];
 		}
-
-		return (count_users * 1.) / (users.size() - 1);
+		const int user_count = GetUserCount();
+		if (user_count == 1) {
+			return 1;
+		}
+		// ѕо умолчанию деление целочисленное, поэтому
+		// нужно привести числитель к типу double.
+		// ѕростой способ сделать это Ч умножить его на 1.0.
+		return (user_count - page_achieved_by_count_[pages_count]) * 1.0
+			/ (user_count - 1);
 	}
 
 private:
+	// —татическое поле не принадлежит какому-либо конкретному объекту класса. 
+	// ѕо сути это глобальна€ переменна€, в данном случае - константна€.
+	// Ѕудь она публичной, к ней можно было бы обратитьс€ снаружи
+	// следующим образом: ReadingManager::MAX_USER_COUNT.
 	static const int MAX_USER_COUNT_ = 100'000;
+	static const int MAX_PAGE_COUNT_ = 1'000;
 
-	map<int, int> users; // <Id, Page>
-	vector<int> pages_u;
+	// Ќомер страницы, до которой дочитал пользователь <ключ>
+	vector<int> user_page_counts_;
+	//  оличество пользователей, дочитавших (как минимум) до страницы <индекс>
+	vector<int> page_achieved_by_count_;
+
+	int GetUserCount() const {
+		return page_achieved_by_count_[0];
+	}
+
+	// lhs включительно, rhs не включительно
+	void UpdatePageRange(int lhs, int rhs) {
+		for (int i = lhs; i < rhs; ++i) {
+			++page_achieved_by_count_[i];
+		}
+	}
 };
 
 
