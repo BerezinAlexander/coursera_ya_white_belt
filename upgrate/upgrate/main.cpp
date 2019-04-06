@@ -1,4 +1,4 @@
-#include "test_runner.h"
+//#include "test_runner.h"
 
 #include <iostream>
 #include <string>
@@ -18,26 +18,19 @@ using namespace std;
 class ReadingManager {
 public:
 	ReadingManager()
-	{}
+	{		
+		pages_u.resize(1001);
+		for (int i = 0; i < 1001; ++i)
+			pages_u[i] = 0;
+	}
 
 	void Read(int user_id, int page_count) {
-		
-		if (users.empty()) {
-			users[user_id] = page_count;
-			pages[page_count].insert(user_id);
-			return;
+		if (users.count(user_id) != 0) {
+			--pages_u[users[user_id]];
 		}
 
-		if (users.count(user_id) == 0) {
-			users[user_id] = page_count;
-			pages[page_count].insert(user_id);
-		}
-		else {
-			int old_page = users[user_id];
-			pages[old_page].erase(user_id);
-			pages[page_count].insert(user_id);
-			users[user_id] = page_count;
-		}
+		users[user_id] = page_count;
+		++pages_u[page_count];
 	}
 
 	double Cheer(int user_id) const {
@@ -49,51 +42,41 @@ public:
 
 		int count_users = 0;
 		int page = users.at(user_id);
-		for (auto it = pages.begin(); it != pages.end(); ++it) {
-			if (it->first == page)
-				break;
-
-			count_users += it->second.size();
+		for (int i = 0; i < page; ++i) {
+			count_users += pages_u[i];
 		}
 
-		int all_users = users.size() - 1;
-
-		return (count_users * 1.) / all_users;
+		return (count_users * 1.) / (users.size() - 1);
 	}
 
 private:
-	// Статическое поле не принадлежит какому-то конкретному
-	// объекту класса. По сути это глобальная переменная,
-	// в данном случае константная.
-	// Будь она публичной, к ней можно было бы обратиться снаружи
-	// следующим образом: ReadingManager::MAX_USER_COUNT.
 	static const int MAX_USER_COUNT_ = 100'000;
 
 	map<int, int> users; // <Id, Page>
-	map<int, set<int>> pages; // Page, set<Id>
+	vector<int> pages_u;
 };
 
 
-void Test() {
-	ReadingManager manager;
-
-	ASSERT_EQUAL(manager.Cheer(5), 0);
-	manager.Read(1, 10);
-	ASSERT_EQUAL(manager.Cheer(1), 1);
-	manager.Read(2, 5);
-	manager.Read(3, 7);
-	ASSERT_EQUAL(manager.Cheer(2), 0);
-	ASSERT_EQUAL(manager.Cheer(3), 0.5);
-	manager.Read(3, 10);
-	ASSERT_EQUAL(manager.Cheer(3), 0.5);
-	manager.Read(3, 11);
-	ASSERT_EQUAL(manager.Cheer(3), 1);
-	ASSERT_EQUAL(manager.Cheer(1), 0.5);
-}
+//void Test() {
+//	ReadingManager manager;
+//
+//	ASSERT_EQUAL(manager.Cheer(5), 0);
+//	manager.Read(1, 10);
+//	ASSERT_EQUAL(manager.Cheer(1), 1);
+//	manager.Read(2, 5);
+//	manager.Read(3, 7);
+//	ASSERT_EQUAL(manager.Cheer(2), 0);
+//	ASSERT_EQUAL(manager.Cheer(3), 0.5);
+//	manager.Read(3, 10);
+//	ASSERT_EQUAL(manager.Cheer(3), 0.5);
+//	manager.Read(3, 11);
+//	ASSERT_EQUAL(manager.Cheer(3), 1);
+//	ASSERT_EQUAL(manager.Cheer(1), 0.5);
+//}
 
 int main() {
-	TestRunner tr;
-	RUN_TEST(tr, Test);
+	//TestRunner tr;
+	//RUN_TEST(tr, Test);
 
 	// Для ускорения чтения данных отключается синхронизация
 	// cin и cout с stdio,
