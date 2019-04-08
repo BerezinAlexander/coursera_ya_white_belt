@@ -1,116 +1,97 @@
-#include <iomanip>
-#include <iostream>
-#include <vector>
-#include <utility>
-#include <map>
-#include <string>
-#include <set>
-#include <deque>
-#include <queue>
+#include "test_runner.h"
+
 #include <algorithm>
+#include <iostream>
+#include <string>
+#include <queue>
+#include <stdexcept>
+#include <set>
+#include <list>
+#include <map>
+#include <iterator>
 
 using namespace std;
 
-class HotelManager {
+template <class T>
+class ObjectPool {
 public:
-	void Book(int64_t time, const string& hotel_name,
-		int client_id, int room_count) {
-		current_time_ = time;
-		hotels_[hotel_name].Book({ time, client_id, room_count });
+	T* Allocate() {
+		T* obj = nullptr;
+		if (!freeObjects.empty()) {
+			obj = freeObjects.front();
+			freeObjects.pop();			
+		}
+		else {
+			obj = new T();
+		}
+		alocObjects.insert(obj);
+		//sAlocObjects.insert(obj);
+		return obj;
 	}
-	int ComputeClientCount(const string& hotel_name) {
-		return hotels_[hotel_name].ComputeClientCount(current_time_);
+
+	T* TryAllocate() {
+		T* obj = nullptr;
+		if (!freeObjects.empty()) {
+			obj = freeObjects.front();
+			alocObjects.insert(obj);
+			freeObjects.pop();
+			//sAlocObjects.insert(obj);
+		}
+		return obj;
 	}
-	int ComputeRoomCount(const string& hotel_name) {
-		return hotels_[hotel_name].ComputeRoomCount(current_time_);
+
+	void Deallocate(T* object) {
+		if (alocObjects.count(object)) {
+			freeObjects.push(object);
+			alocObjects.erase(object);
+		}
+		else {
+			throw invalid_argument("");
+		}
+	}
+
+	~ObjectPool() {
+		while (!freeObjects.empty()) {
+			delete freeObjects.front();
+			freeObjects.pop();
+		}
+		for (auto obj : alocObjects) {
+			delete obj;
+			obj = nullptr;
+		}
+		alocObjects.clear();
 	}
 
 private:
-	struct Booking {
-		int64_t time;
-		int client_id;
-		int room_count;
-	};
-
-	class HotelInfo {
-	public:
-		void Book(const Booking& booking) {
-			last_bookings_.push(booking);
-			room_count_ += booking.room_count;
-			++client_booking_counts_[booking.client_id];
-		}
-		int ComputeClientCount(int64_t current_time) {
-			RemoveOldBookings(current_time);
-			return client_booking_counts_.size();
-		}
-		int ComputeRoomCount(int64_t current_time) {
-			RemoveOldBookings(current_time);
-			return room_count_;
-		}
-	private:
-		static const int TIME_WINDOW_SIZE = 86400;
-		queue<Booking> last_bookings_;
-		int room_count_ = 0;
-		map<int, int> client_booking_counts_;
-
-		void PopBooking() {
-			const Booking& booking = last_bookings_.front();
-			room_count_ -= booking.room_count;
-			const auto client_stat_it =
-				client_booking_counts_.find(booking.client_id);
-			if (--client_stat_it->second == 0) {
-				client_booking_counts_.erase(client_stat_it);
-			}
-			last_bookings_.pop();
-		}
-		void RemoveOldBookings(int64_t current_time) {
-			while (
-				!last_bookings_.empty()
-				&& last_bookings_.front().time <= current_time - TIME_WINDOW_SIZE
-				) {
-				PopBooking();
-			}
-		}
-	};
-
-	int64_t current_time_ = 0;
-	map<string, HotelInfo> hotels_;
+	queue<T*> freeObjects;
+	set<T*> alocObjects;
 };
 
+void TestObjectPool() {
+	ObjectPool<string> pool;
+
+	auto p1 = pool.Allocate();
+	auto p2 = pool.Allocate();
+	auto p3 = pool.Allocate();
+
+	*p1 = "first";
+	*p2 = "second";
+	*p3 = "third";
+
+	pool.Deallocate(p2);
+	ASSERT_EQUAL(*pool.Allocate(), "second");
+
+	pool.Deallocate(p3);
+	pool.Deallocate(p1);
+	ASSERT_EQUAL(*pool.Allocate(), "third");
+	ASSERT_EQUAL(*pool.Allocate(), "first");
+
+	pool.Deallocate(p1);
+}
 
 int main() {
-	ios::sync_with_stdio(false);
-	cin.tie(nullptr);
-
-	HotelManager manager;
-
-	int query_count;
-	cin >> query_count;
-
-	for (int query_id = 0; query_id < query_count; ++query_id) {
-		string query_type;
-		cin >> query_type;
-
-		if (query_type == "BOOK") {
-			int64_t time;
-			cin >> time;
-			string hotel_name;
-			cin >> hotel_name;
-			int client_id, room_count;
-			cin >> client_id >> room_count;
-			manager.Book(time, hotel_name, client_id, room_count);
-		}
-		else {
-			string hotel_name;
-			cin >> hotel_name;
-			if (query_type == "CLIENTS") {
-				cout << manager.ComputeClientCount(hotel_name) << "\n";
-			}
-			else if (query_type == "ROOMS") {
-				cout << manager.ComputeRoomCount(hotel_name) << "\n";
-			}
-		}
-	}
+	TestRunner tr;
+	RUN_TEST(tr, TestObjectPool);
 
 #ifdef _MSC_VER
 	system("pause");
