@@ -12,86 +12,89 @@
 
 using namespace std;
 
-template <class T>
-class ObjectPool {
-public:
-	T* Allocate();
-	T* TryAllocate();
-
-	void Deallocate(T* object);
-
-	~ObjectPool();
-
-private:
-	queue<T*> free;
-	set<T*> allocated;
-};
-
 template <typename T>
-T* ObjectPool<T>::Allocate() {
-	if (free.empty()) {
-		free.push(new T);
-	}
-	auto ret = free.front();
-	free.pop();
-	allocated.insert(ret);
-	return ret;
+void Swap(T* first, T* second) {
+	T temp = *first;	
+	*first = *second;
+	*second = temp;
 }
 
 template <typename T>
-T* ObjectPool<T>::TryAllocate() {
-	if (free.empty()) {
-		return nullptr;
-	}
-	return Allocate();
+void SortPointers(vector<T*>& pointers) {
+	sort(pointers.begin(), pointers.end(), [](T* obj1, T* obj2) { return *obj1 < *obj2; });
 }
 
 template <typename T>
-void ObjectPool<T>::Deallocate(T* object) {
-	if (allocated.find(object) == allocated.end()) {
-		throw invalid_argument("");
+void ReversedCopy(T* source, size_t count, T* destination) {
+	vector<T> temp;
+	for (int i = 0; i < count; i++) {
+		temp.emplace_back(*(source + i));
 	}
-	allocated.erase(object);
-	free.push(object);
-}
 
-template <typename T>
-ObjectPool<T>::~ObjectPool() {
-	for (auto x : allocated) {
-		delete x;
-	}
-	while (!free.empty()) {
-		auto x = free.front();
-		free.pop();
-		delete x;
+	for (int i = 0; i < count; i++) {
+		*(destination + i) = temp[count - 1 - i];
 	}
 }
 
-void TestObjectPool() {
-	ObjectPool<string> pool;
+void TestSwap() {
+	int a = 1;
+	int b = 2;
+	Swap(&a, &b);
+	ASSERT_EQUAL(a, 2);
+	ASSERT_EQUAL(b, 1);
 
-	auto p1 = pool.Allocate();
-	auto p2 = pool.Allocate();
-	auto p3 = pool.Allocate();
+	string h = "world";
+	string w = "hello";
+	Swap(&h, &w);
+	ASSERT_EQUAL(h, "hello");
+	ASSERT_EQUAL(w, "world");
+}
 
-	*p1 = "first";
-	*p2 = "second";
-	*p3 = "third";
+void TestSortPointers() {
+	int one = 1;
+	int two = 2;
+	int three = 3;
 
-	pool.Deallocate(p2);
-	ASSERT_EQUAL(*pool.Allocate(), "second");
+	vector<int*> pointers;
+	pointers.push_back(&two);
+	pointers.push_back(&three);
+	pointers.push_back(&one);
 
-	pool.Deallocate(p3);
-	pool.Deallocate(p1);
-	ASSERT_EQUAL(*pool.Allocate(), "third");
-	ASSERT_EQUAL(*pool.Allocate(), "first");
+	SortPointers(pointers);
 
-	pool.Deallocate(p1);
+	ASSERT_EQUAL(pointers.size(), 3u);
+	ASSERT_EQUAL(*pointers[0], 1);
+	ASSERT_EQUAL(*pointers[1], 2);
+	ASSERT_EQUAL(*pointers[2], 3);
+}
+
+void TestReverseCopy() {
+	const size_t count = 7;
+
+	int* source = new int[count];
+	int* dest = new int[count];
+
+	for (size_t i = 0; i < count; ++i) {
+		source[i] = i + 1;
+	}
+	ReversedCopy(source, count, dest);
+	const vector<int> expected1 = { 7, 6, 5, 4, 3, 2, 1 };
+	ASSERT_EQUAL(vector<int>(dest, dest + count), expected1);
+
+	// Области памяти могут перекрываться
+	ReversedCopy(source, count - 1, source + 1);
+	const vector<int> expected2 = { 1, 6, 5, 4, 3, 2, 1 };
+	ASSERT_EQUAL(vector<int>(source, source + count), expected2);
+
+	delete[] dest;
+	delete[] source;
 }
 
 int main() {
 	TestRunner tr;
-	RUN_TEST(tr, TestObjectPool);
+	RUN_TEST(tr, TestSwap);
+	RUN_TEST(tr, TestSortPointers);
+	RUN_TEST(tr, TestReverseCopy);
 
 #ifdef _MSC_VER
 	system("pause");
