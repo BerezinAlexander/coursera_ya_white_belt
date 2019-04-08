@@ -5,6 +5,8 @@
 #include <map>
 #include <string>
 #include <set>
+#include <deque>
+#include <algorithm>
 
 using namespace std;
 
@@ -29,32 +31,60 @@ public:
 	void reservation(const double& time, const int& client_id, 
 		const int& room_count)
 	{
-		records.emplace_back(time, client_id, room_count);
+		records.emplace_front(time, client_id, room_count);
+		rooms_count += room_count;
+		cl_rooms[client_id] += room_count;
+
+		for (auto it = prev(records.end()); it >= records.begin(); --it) {
+			if (current_time - 86400 < it->time) {
+				records.erase(++it, records.end());
+				break;
+			}
+			else {
+				cl_rooms[it->client_id] -= it->room_count;
+				if (cl_rooms[it->client_id] == 0)
+					cl_rooms.erase(it->client_id);
+				rooms_count -= it->room_count;
+			}
+
+		}
+
+		//find_if(records.rbegin(), records.rend())
+
+		//for (auto rit = records.rbegin(); it != records.rend(); ++rit) {
+		//	if (current_time - 86400 >= rit->time) {
+		//		clients.insert(rit->client_id);
+		//	}
+		//}
 	}
 
 	size_t clients() {
-		set<int> clients;
-		for (auto rit = records.rbegin(); rit != records.rend(); ++rit) {
-			if (current_time - 86400 < rit->time) {
-				clients.insert(rit->client_id);
-			}
-		}
-		return clients.size();
+		//set<int> clients;
+		//for (auto rit = records.rbegin(); rit != records.rend(); ++rit) {
+		//	if (current_time - 86400 < rit->time) {
+		//		clients.insert(rit->client_id);
+		//	}
+		//}
+		//return clients.size();
+		return cl_rooms.size();
 	}
 
 	int rooms() {
-		int rooms_count = 0;
-		for (auto rit = records.rbegin(); rit != records.rend(); ++rit) {
-			if (current_time - 86400 < rit->time) {
-				rooms_count += rit->room_count;
-			}
-		}
+		//int rooms_count = 0;
+		//for (auto rit = records.rbegin(); rit != records.rend(); ++rit) {
+		//	if (current_time - 86400 < rit->time) {
+		//		rooms_count += rit->room_count;
+		//	}
+		//}
+		//return rooms_count;
+
 		return rooms_count;
 	}
 
 private:
-	vector<Record> records;
-	//map<int, int> cl_rooms;
+	deque<Record> records;
+	map<int, int> cl_rooms;
+	int rooms_count;
 };
 
 class ReservationManager {
