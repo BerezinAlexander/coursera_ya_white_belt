@@ -15,57 +15,57 @@ using namespace std;
 template <class T>
 class ObjectPool {
 public:
-	T* Allocate() {
-		T* obj = nullptr;
-		if (!freeObjects.empty()) {
-			obj = freeObjects.front();
-			freeObjects.pop();			
-		}
-		else {
-			obj = new T();
-		}
-		alocObjects.insert(obj);
-		//sAlocObjects.insert(obj);
-		return obj;
-	}
+	T* Allocate();
+	T* TryAllocate();
 
-	T* TryAllocate() {
-		T* obj = nullptr;
-		if (!freeObjects.empty()) {
-			obj = freeObjects.front();
-			alocObjects.insert(obj);
-			freeObjects.pop();
-			//sAlocObjects.insert(obj);
-		}
-		return obj;
-	}
+	void Deallocate(T* object);
 
-	void Deallocate(T* object) {
-		if (alocObjects.count(object)) {
-			freeObjects.push(object);
-			alocObjects.erase(object);
-		}
-		else {
-			throw invalid_argument("");
-		}
-	}
-
-	~ObjectPool() {
-		while (!freeObjects.empty()) {
-			delete freeObjects.front();
-			freeObjects.pop();
-		}
-		for (auto obj : alocObjects) {
-			delete obj;
-			obj = nullptr;
-		}
-		alocObjects.clear();
-	}
+	~ObjectPool();
 
 private:
-	queue<T*> freeObjects;
-	set<T*> alocObjects;
+	queue<T*> free;
+	set<T*> allocated;
 };
+
+template <typename T>
+T* ObjectPool<T>::Allocate() {
+	if (free.empty()) {
+		free.push(new T);
+	}
+	auto ret = free.front();
+	free.pop();
+	allocated.insert(ret);
+	return ret;
+}
+
+template <typename T>
+T* ObjectPool<T>::TryAllocate() {
+	if (free.empty()) {
+		return nullptr;
+	}
+	return Allocate();
+}
+
+template <typename T>
+void ObjectPool<T>::Deallocate(T* object) {
+	if (allocated.find(object) == allocated.end()) {
+		throw invalid_argument("");
+	}
+	allocated.erase(object);
+	free.push(object);
+}
+
+template <typename T>
+ObjectPool<T>::~ObjectPool() {
+	for (auto x : allocated) {
+		delete x;
+	}
+	while (!free.empty()) {
+		auto x = free.front();
+		free.pop();
+		delete x;
+	}
+}
 
 void TestObjectPool() {
 	ObjectPool<string> pool;
