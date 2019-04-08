@@ -12,113 +12,150 @@
 
 using namespace std;
 
-#include <algorithm>
-using namespace std;
 
 template <typename T>
-void Swap(T* first, T* second) {
-	auto tmp = *first;
-	*first = *second;
-	*second = tmp;
-}
+class LinkedList {
+public:
+	struct Node {
+		T value;
+		Node* next = nullptr;
+	};
 
-template <typename T>
-void SortPointers(vector<T*>& pointers) {
-	sort(begin(pointers), end(pointers), [](T* lhs, T* rhs) {
-		return *lhs < *rhs;
-		});
-}
-
-template <typename T>
-void ReversedCopy(T* source, size_t count, T* destination) {
-	auto source_begin = source;
-	auto source_end = source + count;
-	auto dest_begin = destination;
-	auto dest_end = destination + count;
-	if (dest_begin >= source_end || dest_end <= source_begin) {
-		reverse_copy(source_begin, source_end, dest_begin);
-	}
-	else if (dest_begin > source_begin) {
-		/* —лучай, когда целева€ область лежит правее исходной
-		 * |   |   |   |d_6|d_5|d_4|d_3|d_2|d_1|
-		 * |s_1|s_2|s_3|s_4|s_5|s_6|   |   |   |
-		 * */
-		for (size_t i = 0; source_begin + i < dest_begin; ++i) {
-			*(dest_end - i - 1) = *(source_begin + i);
+	~LinkedList() {
+		while (head) {
+			PopFront();
 		}
-		reverse(dest_begin, source_end);
 	}
-	else {
-		/* —лучай, когда целева€ область лежит левее исходной
-		 * |d_6|d_5|d_4|d_3|d_2|d_1|   |   |   |
-		 * |   |   |   |s_1|s_2|s_3|s_4|s_5|s_6|
-		 * */
-		for (size_t i = 0; source_end - i - 1 >= dest_end; ++i) {
-			*(dest_begin + i) = *(source_end - i - 1);
+
+	void PushFront(const T& value) {
+		Node* new_node = new Node();
+		new_node->value = value;
+		new_node->next = head;
+		head = new_node;
+	}
+
+	void InsertAfter(Node* node, const T& value) {
+		if (!node) {
+			PushFront(value);
+			return;
 		}
-		reverse(source_begin, dest_end);
+
+		Node* new_node = new Node();
+		new_node->value = value;
+		new_node->next = node->next;
+		node->next = new_node;
 	}
-}
 
-void TestSwap() {
-	int a = 1;
-	int b = 2;
-	Swap(&a, &b);
-	ASSERT_EQUAL(a, 2);
-	ASSERT_EQUAL(b, 1);
+	void RemoveAfter(Node* node) {
+		if (!node) {
+			PopFront();
+			return;
+		}
 
-	string h = "world";
-	string w = "hello";
-	Swap(&h, &w);
-	ASSERT_EQUAL(h, "hello");
-	ASSERT_EQUAL(w, "world");
-}
+		if (!node->next)
+			return;
 
-void TestSortPointers() {
-	int one = 1;
-	int two = 2;
-	int three = 3;
-
-	vector<int*> pointers;
-	pointers.push_back(&two);
-	pointers.push_back(&three);
-	pointers.push_back(&one);
-
-	SortPointers(pointers);
-
-	ASSERT_EQUAL(pointers.size(), 3u);
-	ASSERT_EQUAL(*pointers[0], 1);
-	ASSERT_EQUAL(*pointers[1], 2);
-	ASSERT_EQUAL(*pointers[2], 3);
-}
-
-void TestReverseCopy() {
-	const size_t count = 7;
-
-	int* source = new int[count];
-	int* dest = new int[count];
-
-	for (size_t i = 0; i < count; ++i) {
-		source[i] = i + 1;
+		Node* del_node = node->next;
+		node->next = del_node->next;
+		delete del_node;
 	}
-	ReversedCopy(source, count, dest);
-	const vector<int> expected1 = { 7, 6, 5, 4, 3, 2, 1 };
-	ASSERT_EQUAL(vector<int>(dest, dest + count), expected1);
 
-	// ќбласти пам€ти могут перекрыватьс€
-	ReversedCopy(source, count - 1, source + 1);
-	const vector<int> expected2 = { 1, 6, 5, 4, 3, 2, 1 };
-	ASSERT_EQUAL(vector<int>(source, source + count), expected2);
+	void PopFront() {
+		if (!head)
+			return;
 
-	delete[] dest;
-	delete[] source;
+		Node* del_node = head;
+		head = del_node->next;
+		delete del_node;
+	}
+
+	Node* GetHead() { return head; }
+	const Node* GetHead() const { return head; }
+
+private:
+	Node* head = nullptr;
+};
+
+template <typename T>
+vector<T> ToVector(const LinkedList<T>& list) {
+	vector<T> result;
+	for (auto node = list.GetHead(); node; node = node->next) {
+		result.push_back(node->value);
+	}
+	return result;
+}
+
+void TestPushFront() {
+	LinkedList<int> list;
+
+	list.PushFront(1);
+	ASSERT_EQUAL(list.GetHead()->value, 1);
+	list.PushFront(2);
+	ASSERT_EQUAL(list.GetHead()->value, 2);
+	list.PushFront(3);
+	ASSERT_EQUAL(list.GetHead()->value, 3);
+
+	const vector<int> expected = { 3, 2, 1 };
+	ASSERT_EQUAL(ToVector(list), expected);
+}
+
+void TestInsertAfter() {
+	LinkedList<string> list;
+
+	list.PushFront("a");
+	auto head = list.GetHead();
+	ASSERT(head);
+	ASSERT_EQUAL(head->value, "a");
+
+	list.InsertAfter(head, "b");
+	const vector<string> expected1 = { "a", "b" };
+	ASSERT_EQUAL(ToVector(list), expected1);
+
+	list.InsertAfter(head, "c");
+	const vector<string> expected2 = { "a", "c", "b" };
+	ASSERT_EQUAL(ToVector(list), expected2);
+}
+
+void TestRemoveAfter() {
+	LinkedList<int> list;
+	for (int i = 1; i <= 5; ++i) {
+		list.PushFront(i);
+	}
+
+	const vector<int> expected = { 5, 4, 3, 2, 1 };
+	ASSERT_EQUAL(ToVector(list), expected);
+
+	auto next_to_head = list.GetHead()->next;
+	list.RemoveAfter(next_to_head); // удал€ем 3
+	list.RemoveAfter(next_to_head); // удал€ем 2
+
+	const vector<int> expected1 = { 5, 4, 1 };
+	ASSERT_EQUAL(ToVector(list), expected1);
+
+	while (list.GetHead()->next) {
+		list.RemoveAfter(list.GetHead());
+	}
+	ASSERT_EQUAL(list.GetHead()->value, 5);
+}
+
+void TestPopFront() {
+	LinkedList<int> list;
+
+	for (int i = 1; i <= 5; ++i) {
+		list.PushFront(i);
+	}
+	for (int i = 1; i <= 5; ++i) {
+		list.PopFront();
+	}
+	ASSERT(list.GetHead() == nullptr);
 }
 
 int main() {
 	TestRunner tr;
-	RUN_TEST(tr, TestSwap);
-	RUN_TEST(tr, TestSortPointers);
-	RUN_TEST(tr, TestReverseCopy);
+	RUN_TEST(tr, TestPushFront);
+	RUN_TEST(tr, TestInsertAfter);
+	RUN_TEST(tr, TestRemoveAfter);
+	RUN_TEST(tr, TestPopFront);
 
 #ifdef _MSC_VER
 	system("pause");
