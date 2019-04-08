@@ -12,6 +12,10 @@ using namespace std;
 
 static double current_time = 0;
 
+inline bool check_time(const double& time) {
+	return current_time - 86400 < time;
+};
+
 struct Record {
 	double time;
 	int client_id;
@@ -35,19 +39,7 @@ public:
 		rooms_count += room_count;
 		cl_rooms[client_id] += room_count;
 
-		for (auto it = prev(records.end()); it >= records.begin(); --it) {
-			if (current_time - 86400 < it->time) {
-				records.erase(++it, records.end());
-				break;
-			}
-			else {
-				cl_rooms[it->client_id] -= it->room_count;
-				if (cl_rooms[it->client_id] == 0)
-					cl_rooms.erase(it->client_id);
-				rooms_count -= it->room_count;
-			}
-
-		}
+		//update();
 
 		//find_if(records.rbegin(), records.rend())
 
@@ -66,6 +58,9 @@ public:
 		//	}
 		//}
 		//return clients.size();
+
+		update();
+
 		return cl_rooms.size();
 	}
 
@@ -78,7 +73,29 @@ public:
 		//}
 		//return rooms_count;
 
+		update();
+
 		return rooms_count;
+	}
+
+	void update() {
+		for (auto it = prev(records.end()); it >= records.begin(); --it) {
+			if (check_time(it->time)) {
+				records.erase(++it, records.end());
+				break;
+			}
+			else {
+				cl_rooms[it->client_id] -= it->room_count;
+				if (cl_rooms[it->client_id] == 0)
+					cl_rooms.erase(it->client_id);
+				rooms_count -= it->room_count;
+			}
+
+			if (cl_rooms.empty()) {
+				records.clear();
+			}
+
+		}
 	}
 
 private:
