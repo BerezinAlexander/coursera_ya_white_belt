@@ -120,7 +120,8 @@
     <ClCompile Include="main.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\..\coursera_ya\test_runner.h" />
+    <ClInclude Include="profile.h" />
+    <ClInclude Include="test_runner.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
