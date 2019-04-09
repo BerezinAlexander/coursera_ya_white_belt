@@ -1,6 +1,9 @@
 #include "test_runner.h"
 #include "profile.h"
 
+#include "http_request.h"
+#include "stats.h"
+
 #include <algorithm>
 #include <array>
 #include <iostream>
@@ -8,272 +11,90 @@
 #include <vector>
 #include <list>
 
+#include <string_view>
+
 using namespace std;
 
-class Editor {
-public:
-	// –еализуйте конструктор по умолчанию и объ€вленные методы
-	Editor() {
-		pos = text.end();
+Stats ServeRequests(istream& input) {
+	Stats result;
+	for (string line; getline(input, line); ) {
+		const HttpRequest req = ParseRequest(line);
+		result.AddUri(req.uri);
+		result.AddMethod(req.method);
 	}
-	void Left() {
-		if (pos != text.begin())
-			pos = prev(pos);
-	}
-	void Right() {
-		if (pos != text.end()) {
-			pos = next(pos);
-		}
-	}
-	void Insert(char token) {
-		if (!token)
-			return;
-
-		text.insert(pos, token);
-	}
-	void Cut(size_t tokens = 1) {
-		auto cut_end = pos;
-		while (cut_end != text.end() && tokens > 0) {
-			cut_end = next(cut_end);
-			--tokens;
-		}	
-
-		if (pos == cut_end) {
-			buffer.clear();
-			return;
-		}
-
-		buffer = list<char>(pos, cut_end);
-		text.erase(pos, cut_end);
-		pos = cut_end;
-	}
-	void Copy(size_t tokens = 1) {
-		auto cut_end = pos;
-		while (cut_end != text.end() && tokens > 0) {
-			cut_end = next(cut_end);
-			--tokens;
-		}
-		
-		if (pos == cut_end) {
-			buffer.clear();
-			return;
-		}
-
-		buffer = list<char>(pos, cut_end);
-	}
-	void Paste() {
-		if (buffer.empty())
-			return;
-
-		text.insert(pos, buffer.begin(), buffer.end());
-		//if(pos != text.end())
-		//	pos = next(pos, buffer.size());
-	}
-	string GetText() const {
-		string result;
-		for (auto c : text)
-			result += c;
-		return result;
-	}
-
-private:
-	list<char>::iterator pos;
-	list<char> text;
-	list<char> buffer;
-};
-
-void TypeText(Editor& editor, const string& text) {
-	for (char c : text) {
-		editor.Insert(c);
-	}
+	return result;
 }
 
-void TestEditing() {
-	{
-		Editor editor;
+void TestBasic() {
+	const string input =
+		R"(GET / HTTP/1.1
+    POST /order HTTP/1.1
+    POST /product HTTP/1.1
+    POST /product HTTP/1.1
+    POST /product HTTP/1.1
+    GET /order HTTP/1.1
+    PUT /product HTTP/1.1
+    GET /basket HTTP/1.1
+    DELETE /product HTTP/1.1
+    GET / HTTP/1.1
+    GET / HTTP/1.1
+    GET /help HTTP/1.1
+    GET /upyachka HTTP/1.1
+    GET /unexpected HTTP/1.1
+    HEAD / HTTP/1.1)";
 
-		const size_t text_len = 12;
-		const size_t first_part_len = 7;
-		TypeText(editor, "hello, world");
-		for (size_t i = 0; i < text_len; ++i) {
-			editor.Left();
-		}
-		editor.Cut(first_part_len);
-		for (size_t i = 0; i < text_len - first_part_len; ++i) {
-			editor.Right();
-		}
-		TypeText(editor, ", ");
-		editor.Paste();
-		editor.Left();
-		editor.Left();
-		editor.Cut(3);
+	const map<string_view, int> expected_method_count = {
+	  {"GET", 8},
+	  {"PUT", 1},
+	  {"POST", 4},
+	  {"DELETE", 1},
+	  {"UNKNOWN", 1},
+	};
+	const map<string_view, int> expected_url_count = {
+	  {"/", 4},
+	  {"/order", 2},
+	  {"/product", 5},
+	  {"/basket", 1},
+	  {"/help", 1},
+	  {"unknown", 2},
+	};
 
-		ASSERT_EQUAL(editor.GetText(), "world, hello");
-	}
-	{
-		Editor editor;
+	istringstream is(input);
+	const Stats stats = ServeRequests(is);
 
-		TypeText(editor, "misprnit");
-		editor.Left();
-		editor.Left();
-		editor.Left();
-		editor.Cut(1);
-		editor.Right();
-		editor.Paste();
-
-		ASSERT_EQUAL(editor.GetText(), "misprint");
-	}
+	ASSERT_EQUAL(stats.GetMethodStats(), expected_method_count);
+	ASSERT_EQUAL(stats.GetUriStats(), expected_url_count);
 }
 
-void TestReverse() {
-	Editor editor;
+void TestAbsentParts() {
+	// ћетоды GetMethodStats и GetUriStats должны возвращать словари
+	// с полным набором ключей, даже если какой-то из них не встречалс€
 
-	const string text = "esreveR";
-	for (char c : text) {
-		editor.Insert(c);
-		editor.Left();
-	}
+	const map<string_view, int> expected_method_count = {
+	  {"GET", 0},
+	  {"PUT", 0},
+	  {"POST", 0},
+	  {"DELETE", 0},
+	  {"UNKNOWN", 0},
+	};
+	const map<string_view, int> expected_url_count = {
+	  {"/", 0},
+	  {"/order", 0},
+	  {"/product", 0},
+	  {"/basket", 0},
+	  {"/help", 0},
+	  {"unknown", 0},
+	};
+	const Stats default_constructed;
 
-	ASSERT_EQUAL(editor.GetText(), "Reverse");
+	ASSERT_EQUAL(default_constructed.GetMethodStats(), expected_method_count);
+	ASSERT_EQUAL(default_constructed.GetUriStats(), expected_url_count);
 }
-
-void TestNoText() {
-	Editor editor;
-	ASSERT_EQUAL(editor.GetText(), "");
-
-	editor.Left();
-	editor.Left();
-	editor.Right();
-	editor.Right();
-	editor.Copy(0);
-	editor.Cut(0);
-	editor.Paste();
-
-	ASSERT_EQUAL(editor.GetText(), "");
-}
-
-void TestEmptyBuffer() {
-	Editor editor;
-
-	editor.Paste();
-	TypeText(editor, "example");
-	editor.Left();
-	editor.Left();
-	editor.Paste();
-	editor.Right();
-	editor.Paste();
-	editor.Copy(0);
-	editor.Paste();
-	editor.Left();
-	editor.Cut(0);
-	editor.Paste();
-
-	ASSERT_EQUAL(editor.GetText(), "example");
-}
-
-void TestOne() {
-	Editor editor;
-
-	editor.Insert('h');
-	editor.Insert('e');
-	editor.Insert('l');
-	editor.Insert('l');
-	editor.Insert('o');
-	editor.Insert(',');
-	editor.Insert('_');
-	editor.Insert('w');
-	editor.Insert('o');
-	editor.Insert('r');
-	editor.Insert('l');
-	editor.Insert('d');
-
-	editor.Left();
-	editor.Left();
-	editor.Left();
-	editor.Left();
-	editor.Left();
-	editor.Left();
-	editor.Left();
-	editor.Left();
-	editor.Left();
-	editor.Left();
-	editor.Left();
-	editor.Left();
-
-	editor.Cut(7);
-
-	editor.Right();
-	editor.Right();
-	editor.Right();
-	editor.Right();
-	editor.Right();
-
-	editor.Insert(',');
-	editor.Insert('_');
-
-	editor.Paste();
-
-	editor.Left();
-	editor.Left();
-
-	editor.Cut(3);
-
-	ASSERT_EQUAL(editor.GetText(), "world,_hello");
-}
-
-void TestUser() {
-	Editor editor;
-
-	editor.Paste();
-	TypeText(editor, "example is very best word");
-	
-	for (int i = 0; i<9; ++i)
-		editor.Left();
-	
-	editor.Cut(4);
-	TypeText(editor, "small ");
-
-	editor.Paste();
-
-	//editor.Paste();
-	//editor.Right();
-	//editor.Paste();
-	//editor.Copy(0);
-	//editor.Paste();
-	//editor.Left();
-	//editor.Cut(0);
-	//editor.Paste();
-
-	ASSERT_EQUAL(editor.GetText(), "example is very small best word");
-
-	editor.Paste();
-
-	ASSERT_EQUAL(editor.GetText(), "example is very small bestbest word");
-
-
-	for (int i = 0; i < 15; ++i)
-		editor.Left();
-	editor.Cut(6);
-
-	ASSERT_EQUAL(editor.GetText(), "example is very bestbest word");
-
-	for (int i = 0; i < 14; ++i)
-		editor.Right();
-	editor.Paste();
-	ASSERT_EQUAL(editor.GetText(), "example is very bestbest word small");
-
-}
-
-
 
 int main() {
 	TestRunner tr;
-	RUN_TEST(tr, TestEditing);
-	RUN_TEST(tr, TestReverse);
-	RUN_TEST(tr, TestNoText);
-	RUN_TEST(tr, TestEmptyBuffer);
-	RUN_TEST(tr, TestOne);
-	RUN_TEST(tr, TestUser);
+	RUN_TEST(tr, TestBasic);
+	RUN_TEST(tr, TestAbsentParts);
 
 #ifdef _MSC_VER
 	system("pause");
