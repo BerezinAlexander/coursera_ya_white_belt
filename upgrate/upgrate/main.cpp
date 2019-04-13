@@ -15,93 +15,58 @@
 
 #include <string_view>
 #include <tuple>
+#include <memory>
+
 
 using namespace std;
 
-// Объявляем Sentence<Token> для произвольного типа Token
-// синонимом vector<Token>.
-// Благодаря этому в качестве возвращаемого значения
-// функции можно указать не малопонятный вектор векторов,
-// а вектор предложений — vector<Sentence<Token>>.
-template <typename Token>
-using Sentence = vector<Token>;
+template <typename RandomIt>
+void MergeSort(RandomIt range_begin, RandomIt range_end) {
+	// Напишите реализацию функции,
+	// не копируя сортируемые элементы
 
-// Класс Token имеет метод bool IsEndSentencePunctuation() const
-template <typename Token>
-vector<Sentence<Token>> SplitIntoSentences(vector<Token> tokens) {
-	// Напишите реализацию функции, не копируя объекты типа Token
-	vector<Sentence<Token>> sentenses;
-	Sentence<Token> sentense;
-	
-	auto it = tokens.begin();
-
-	while (it != tokens.end()) {
-
-		while (it != tokens.end() && !(*it).IsEndSentencePunctuation()) {
-			sentense.push_back(move(*it));
-			++it;
-		}
-
-		while (it != tokens.end() && (*it).IsEndSentencePunctuation()) {
-			sentense.push_back(move(*it));
-			++it;
-		}
-
-		sentenses.push_back(move(sentense));
-
+	// 1. Если диапазон содержит меньше 2 элементов, выходим из функции
+	size_t range_length = range_end - range_begin;
+	if (range_length < 2) {
+		return;
 	}
 
-	return sentenses;
+	// 2. Создаем вектор, содержащий все элементы текущего диапазона
+	vector<typename RandomIt::value_type> elements(
+			make_move_iterator(range_begin), make_move_iterator(range_end));
+
+	// 3. Разбиваем вектор на три равные части
+	auto mid1 = elements.begin() + range_length / 3;
+	auto mid2 = mid1 + range_length / 3;
+
+	// 4. Вызываем функцию MergeSort от каждой половины вектора
+	MergeSort(elements.begin(), mid1);
+	MergeSort(mid1, mid2);
+	MergeSort(mid2, elements.end());
+
+	// 5. С помощью алгоритма merge сливаем отсортированные половины
+	// в исходный диапазон
+	// merge -> http://ru.cppreference.com/w/cpp/algorithm/merge
+	vector<typename RandomIt::value_type> temp;
+	merge(make_move_iterator(elements.begin()), 
+			make_move_iterator(mid1), 
+			make_move_iterator(mid1), 
+			make_move_iterator(mid2), 
+			back_inserter(temp)
+	);
+	merge(make_move_iterator(temp.begin()), make_move_iterator(temp.end()),
+		make_move_iterator(mid2), make_move_iterator(elements.end()), range_begin);
 }
 
-struct TestToken {
-	string data;
-	bool is_end_sentence_punctuation = false;
-
-	bool IsEndSentencePunctuation() const {
-		return is_end_sentence_punctuation;
-	}
-	bool operator==(const TestToken& other) const {
-		return data == other.data && is_end_sentence_punctuation == other.is_end_sentence_punctuation;
-	}
-};
-
-ostream& operator<<(ostream& stream, const TestToken& token) {
-	return stream << token.data;
-}
-
-// Тест содержит копирования объектов класса TestToken.
-// Для проверки отсутствия копирований в функции SplitIntoSentences
-// необходимо написать отдельный тест.
-void TestSplitting() {
-	ASSERT_EQUAL(
-		SplitIntoSentences(vector<TestToken>({ {"Split"}, {"into"}, {"sentences"}, {"!"} })),
-		vector<Sentence<TestToken>>({
-			{{"Split"}, {"into"}, {"sentences"}, {"!"}}
-			})
-	);
-
-	ASSERT_EQUAL(
-		SplitIntoSentences(vector<TestToken>({ {"Split"}, {"into"}, {"sentences"}, 
-			{"!", true} })),
-		vector<Sentence<TestToken>>({
-			{{"Split"}, {"into"}, {"sentences"}, {"!", true}}
-			})
-	);
-
-	ASSERT_EQUAL(
-		SplitIntoSentences(vector<TestToken>({ {"Split"}, {"into"}, {"sentences"}, 
-			{"!", true}, {"!", true}, {"Without"}, {"copies"}, {".", true} })),
-		vector<Sentence<TestToken>>({
-			{{"Split"}, {"into"}, {"sentences"}, {"!", true}, {"!", true}},
-			{{"Without"}, {"copies"}, {".", true}},
-			})
-			);
+void TestIntVector() {
+	vector<int> numbers = { 6, 1, 3, 9, 1, 9, 8, 12, 1 };
+	MergeSort(begin(numbers), end(numbers));
+	ASSERT(is_sorted(begin(numbers), end(numbers)));
 }
 
 int main() {
 	TestRunner tr;
-	RUN_TEST(tr, TestSplitting);
+	RUN_TEST(tr, TestIntVector);
 
 #ifdef _MSC_VER
 	system("pause");
