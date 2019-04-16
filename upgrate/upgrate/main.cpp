@@ -24,55 +24,62 @@ using namespace std;
 template <typename T>
 class PriorityCollection {
 public:
-	//using Id = typename list<T>::iterator;
+	using Id = int;
+	using Prior = int;
 
-	struct Id {
-		typename list<T>::iterator it;
-		int prior;
-		int position;
+	PriorityCollection() {
+		const int max_count = 1'000'000;
+		data.resize(max_count);
+		valid.resize(max_count, false);
+	}
 
-		Id() : prior(0), position(0) {}
+	//struct Id {
+	//	typename list<T>::iterator it;
+	//	int prior;
+	//	int position;
 
-		Id(typename list<T>::iterator it_, int prior_, int pos_) : it(it_), prior(prior_), position(pos_) {}
+	//	Id() : prior(0), position(0) {}
 
-		Id(const Id& other) : it(other.it), prior(other.prior), position(other.position) {}
+	//	Id(typename list<T>::iterator it_, int prior_, int pos_) : it(it_), prior(prior_), position(pos_) {}
 
-		bool operator==(const Id& rhs) const { return (*it == *rhs.it); }
-		bool operator!=(const Id& rhs) const { return (*it != *rhs.it); }
-		bool operator> (const Id& rhs) const { 
-			if (prior == rhs.prior)
-				return position > rhs.position;
-			else
-				return prior > rhs.prior;
-		}
-		bool operator>=(const Id& rhs) const { 
-			if (prior == rhs.prior)
-				return position >= rhs.position;
-			else
-				return prior > rhs.prior;
-		}
-		bool operator< (const Id& rhs) const { 
-			if (prior == rhs.prior)
-				return position < rhs.position;
-			else
-				return prior < rhs.prior;
-		}
-		bool operator<=(const Id& rhs) const { 
-			if (prior == rhs.prior)
-				return position <= rhs.position;
-			else
-				return prior < rhs.prior;
-		}
-	};
+	//	Id(const Id& other) : it(other.it), prior(other.prior), position(other.position) {}
+
+	//	bool operator==(const Id& rhs) const { return (*it == *rhs.it); }
+	//	bool operator!=(const Id& rhs) const { return (*it != *rhs.it); }
+	//	bool operator> (const Id& rhs) const { 
+	//		if (prior == rhs.prior)
+	//			return position > rhs.position;
+	//		else
+	//			return prior > rhs.prior;
+	//	}
+	//	bool operator>=(const Id& rhs) const { 
+	//		if (prior == rhs.prior)
+	//			return position >= rhs.position;
+	//		else
+	//			return prior > rhs.prior;
+	//	}
+	//	bool operator< (const Id& rhs) const { 
+	//		if (prior == rhs.prior)
+	//			return position < rhs.position;
+	//		else
+	//			return prior < rhs.prior;
+	//	}
+	//	bool operator<=(const Id& rhs) const { 
+	//		if (prior == rhs.prior)
+	//			return position <= rhs.position;
+	//		else
+	//			return prior < rhs.prior;
+	//	}
+	//};
 
 
 	// Добавить объект с нулевым приоритетом
 	// с помощью перемещения и вернуть его идентификатор
 	Id Add(T object) {
-		data.push_back(move(object));
-		Id id(prev(data.end()), 0, count++);
-		priority.insert(id);
-		return id;
+		data[count] = { move(object), 0 };
+		valid[count] = true;
+		priority.insert({0, count});
+		return count++;
 	}
 
 	// Добавить все элементы диапазона [range_begin, range_end)
@@ -90,44 +97,42 @@ public:
 	// Определить, принадлежит ли идентификатор какому-либо
 	// хранящемуся в контейнере объекту
 	bool IsValid(Id id) const {
-		return priority.count(id);
+		return valid[id];
 	}
 
 	// Получить объект по идентификатору
 	const T& Get(Id id) const {
-		return *id.it;
+		return data[id].first;
 	}
 
 	// Увеличить приоритет объекта на 1
 	void Promote(Id id) {
-		auto it = find_if(priority.begin(), priority.end(), [&id](const Id& cur) {return cur == id; });
-		if (it != priority.end()) {
-			Id cur = *it;
-			cur.prior++;
-			priority.erase(it);
-			priority.insert(cur);
-		}
+		priority.erase({ data[id].second , id });
+		priority.insert({ ++data[id].second , id });
 	}
 
 	// Получить объект с максимальным приоритетом и его приоритет
 	pair<const T&, int> GetMax() const {
-		const Id& id = *prev(priority.cend());
-		return { *(id.it), id.prior };
+		auto& p = *prev(priority.cend());
+		return { data[p.second].first, p.first };
 	}
 
 	// Аналогично GetMax, но удаляет элемент из контейнера
 	pair<T, int> PopMax() {
-		auto it = prev(priority.end());
-		pair<T, int> p = make_pair(move(*(it->it)), it->prior);
-		data.erase(it->it);
-		priority.erase(it);
-		return p;
+		auto& p = *prev(priority.end());
+		Id id = p.second;
+		valid[id] = false;
+		priority.erase(prev(priority.end()));
+		return move(data[id]);
 	}
 
 private:
 	// Приватные поля и методы
-	set<Id> priority;
-	list<T> data;
+	set<pair<Prior, Id>> priority; // prior, index
+	//list<T> data;
+
+	vector<pair<T, Prior>> data;
+	vector<bool> valid;
 
 	int count = 0;
 };
