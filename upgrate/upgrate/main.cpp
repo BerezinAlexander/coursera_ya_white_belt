@@ -18,112 +18,110 @@
 #include <memory>
 #include <iterator>
 
+#include <future>
+#include <mutex>
+
 
 using namespace std;
 
-template <typename T>
-class PriorityCollection {
+template <typename Iterator>
+class IteratorRange {
 public:
-	using Id = int;
-
-	Id Add(T object) {
-		const Id new_id = objects.size();
-		objects.push_back({ move(object) });
-		sorted_objects.insert({ 0, new_id });
-		return new_id;
+	IteratorRange(Iterator begin, Iterator end)
+		: first(begin)
+		, last(end)
+		, size_(distance(first, last))
+	{
 	}
 
-	template <typename ObjInputIt, typename IdOutputIt>
-	void Add(ObjInputIt range_begin, ObjInputIt range_end,
-		IdOutputIt ids_begin) {
-		while (range_begin != range_end) {
-			*ids_begin++ = Add(move(*range_begin++));
-		}
+	Iterator begin() const {
+		return first;
 	}
 
-	bool IsValid(Id id) const {
-		return id >= 0 && id < objects.size() &&
-			objects[id].priority != NONE_PRIORITY;
+	Iterator end() const {
+		return last;
 	}
 
-	const T& Get(Id id) const {
-		return objects[id].data;
-	}
-
-	void Promote(Id id) {
-		auto& item = objects[id];
-		const int old_priority = item.priority;
-		const int new_priority = ++item.priority;
-		sorted_objects.erase({ old_priority, id });
-		sorted_objects.insert({ new_priority, id });
-	}
-
-	pair<const T&, int> GetMax() const {
-		const auto& item = objects[prev(sorted_objects.end())->second];
-		return { item.data, item.priority };
-	}
-
-	pair<T, int> PopMax() {
-		const auto sorted_objects_it = prev(sorted_objects.end());
-		auto& item = objects[sorted_objects_it->second];
-		sorted_objects.erase(sorted_objects_it);
-		const int priority = item.priority;
-		item.priority = NONE_PRIORITY;
-		return { move(item.data), priority };
+	size_t size() const {
+		return size_;
 	}
 
 private:
-	struct ObjectItem {
-		T data;
-		int priority = 0;
-	};
-	static const int NONE_PRIORITY = -1;
-
-	vector<ObjectItem> objects;
-	set<pair<int, Id>> sorted_objects;
+	Iterator first, last;
+	size_t size_;
 };
 
+template <typename Iterator>
+class Paginator {
+private:
+	vector<IteratorRange<Iterator>> pages;
 
-class StringNonCopyable : public string {
 public:
-	using string::string;  // ѕозвол€ет использовать конструкторы строки
-	StringNonCopyable(const StringNonCopyable&) = delete;
-	StringNonCopyable(StringNonCopyable&&) = default;
-	StringNonCopyable& operator=(const StringNonCopyable&) = delete;
-	StringNonCopyable& operator=(StringNonCopyable&&) = default;
+	Paginator(Iterator begin, Iterator end, size_t page_size) {
+		for (size_t left = distance(begin, end); left > 0; ) {
+			size_t current_page_size = min(page_size, left);
+			Iterator current_page_end = next(begin, current_page_size);
+			pages.push_back({ begin, current_page_end });
+
+			left -= current_page_size;
+			begin = current_page_end;
+		}
+	}
+
+	auto begin() const {
+		return pages.begin();
+	}
+
+	auto end() const {
+		return pages.end();
+	}
+
+	size_t size() const {
+		return pages.size();
+	}
 };
 
-void TestNoCopy() {
-	PriorityCollection<StringNonCopyable> strings;
-	const auto white_id = strings.Add("white");
-	const auto yellow_id = strings.Add("yellow");
-	const auto red_id = strings.Add("red");
+template <typename C>
+auto Paginate(C& c, size_t page_size) {
+	return Paginator(begin(c), end(c), page_size);
+}
 
-	strings.Promote(yellow_id);
-	for (int i = 0; i < 2; ++i) {
-		strings.Promote(red_id);
+template <typename ContainerOfVectors>
+int64_t SumSingleThread(const ContainerOfVectors& matrix) {
+	int64_t sum = 0;
+	for (const auto& row : matrix) {
+		for (auto item : row) {
+			sum += item;
+		}
 	}
-	strings.Promote(yellow_id);
-	{
-		const auto item = strings.PopMax();
-		ASSERT_EQUAL(item.first, "red");
-		ASSERT_EQUAL(item.second, 2);
+	return sum;
+}
+
+int64_t CalculateMatrixSum(const vector<vector<int>>& matrix) {
+	vector<future<int64_t>> futures;
+	for (auto page : Paginate(matrix, 2000)) {
+		futures.push_back(async([=] { return SumSingleThread(page); }));
 	}
-	{
-		const auto item = strings.PopMax();
-		ASSERT_EQUAL(item.first, "yellow");
-		ASSERT_EQUAL(item.second, 2);
+	int64_t result = 0;
+	for (auto& f : futures) {
+		result += f.get();
 	}
-	{
-		const auto item = strings.PopMax();
-		ASSERT_EQUAL(item.first, "white");
-		ASSERT_EQUAL(item.second, 0);
-	}
+	return result;
+}
+
+void TestCalculateMatrixSum() {
+	const vector<vector<int>> matrix = {
+	  {1, 2, 3, 4},
+	  {5, 6, 7, 8},
+	  {9, 10, 11, 12},
+	  {13, 14, 15, 16}
+	};
+	ASSERT_EQUAL(CalculateMatrixSum(matrix), 136);
 }
 
 int main() {
 	TestRunner tr;
-	RUN_TEST(tr, TestNoCopy);
+	RUN_TEST(tr, TestCalculateMatrixSum);
 
 #ifdef _MSC_VER
 	system("pause");
