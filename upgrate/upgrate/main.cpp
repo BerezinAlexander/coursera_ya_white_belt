@@ -30,197 +30,90 @@ struct Stats {
 	map<string, int> word_frequences;
 
 	void operator += (const Stats& other) {
-		for (auto& p : other.word_frequences) {
-			word_frequences[p.first] += p.second;
+		for (auto& [word, frequency] : other.word_frequences) {
+			word_frequences[word] += frequency;
 		}
 	}
-	
-	//friend ostream& operator << (ostream& s, const Stats& my)
-	//{
-	//	cout << "Stats:" << endl;
-	//	for (const auto& p : my.word_frequences) {
-	//		s << p.first << " " << p.second << endl;
-	//	}
-	//	return s;
-	//}
 };
 
-Stats ExploreLine(const set<string>& key_words, const string& line) {
-	string_view sv(line);
-	Stats stats;
-
-	while (true) {
-		size_t space = sv.find(' ');
-		string str(sv.substr(0, space));
-
-		if (key_words.count(str)) {
-			stats.word_frequences[str]++;
-		}
-
-		if (space == str.npos) {
-			break;
-		}
-		else {
-			sv.remove_prefix(space+1);
-		}
-	}
-
-	return stats;
+set<string> ReadKeyWords(istream& is) {
+	return { istream_iterator<string>(is), istream_iterator<string>() };
 }
 
+vector<string> Split(const string& line) {
+	// http://en.cppreference.com/w/cpp/iterator/istream_iterator
+	istringstream line_splitter(line);
+	return { istream_iterator<string>(line_splitter), istream_iterator<string>() };
+}
 
-
-//Stats ExploreLine(const set<string>& key_words, const string& line) {
-//	//set<string_view> key_words_view;
-//	//for (auto& key : key_words)
-//	//	key_words_view.insert(key);
-//	
-//	string_view sv(line);
-//	//stringstream ss(move(line));
-//	Stats stats;
-//	size_t pos = sv.find_first_not_of(" ");
-//	while (pos != string::npos) {
-//		sv.remove_prefix(pos);
-//		pos = sv.find_first_of(" ");
-//		if (pos != string::npos) {
-//			string str(sv.substr(0, pos));
-//			if (key_words.count(str)) {
-//				addToMap(stats.word_frequences, str);
-//			}
-//		}
-//		else {
-//			string str(sv.substr(0));
-//			if (key_words.count(str)) {
-//				addToMap(stats.word_frequences, str);
-//			}
-//			break;
-//		}
-//		sv.remove_prefix(pos);
-//		pos = sv.find_first_not_of(" ");
-//	}
-//
-//	//string word;
-//	//while (ss >> word) {
-//	//	if (key_words.count(word)) {
-//	//		addToMap(stats.word_frequences, word);
-//	//	}
-//	//}
-//	return stats;
-//}
-
-//Stats ExploreLine(const set<string>& key_words, const string& line) {
-//	stringstream ss(move(line));
-//	Stats stats;
-//
-//	string word;
-//	while (ss >> word) {
-//		if (key_words.count(word)) {
-//			addToMap(stats.word_frequences, word);
-//		}
-//	}
-//	return stats;
-//}
-
-//Stats ExploreKeyWordsSingleThread(
-//		const set<string>& key_words, istream& input) {
-//	Stats result;
-//	for (string line; getline(input, line); ) {
-//		result += ExploreLine(key_words, line);
-//	}
-//	return result;
-//}
+Stats ExploreLine(const set<string>& key_words, const string& line) {
+	Stats result;
+	for (const string& word : Split(line)) {
+		if (key_words.count(word) > 0) {
+			result.word_frequences[word]++;
+		}
+	}
+	return result;
+}
 
 Stats ExploreKeyWordsSingleThread(
-	const set<string>& key_words, vector<string>& input) {
+	const set<string>& key_words, istream& input
+) {
 	Stats result;
-	for (auto line : input) {
+	for (string line; getline(input, line); ) {
 		result += ExploreLine(key_words, line);
 	}
 	return result;
 }
 
-//Stats ExploreKeyWords(const set<string>& key_words, istream& input) {
-//
-//	LOG_DURATION("ExploreKeyWords");
-//
-//	//int count_threads = 1000;
-//	int count_ss = 25000;
-//
-//	// Реализуйте эту функцию
-//	vector<future<Stats>> futures;
-//
-//
-//	vector<stringstream> vss(2); // (count_threads + 1);
-//	//vss.emplace_back("");
-//	int count = 0;
-//	int c_t = 0;
-//	for (string line; getline(input, line); ) {
-//		vss[c_t] << line << "\n";
-//		if (++count == count_ss) {
-//			++c_t;
-//			//vss.emplace_back("");
-//		}
-//	}
-//
-//	for (auto& ss : vss) {
-//		futures.push_back(async(ExploreKeyWordsSingleThread, ref(key_words), ref(ss)));
-//	}
-//
-//	Stats stats;
-//	for (auto& f : futures) {
-//		stats += f.get();
-//	}
-//
-//	return stats;
-//}
+Stats ExploreBatch(const set<string>& key_words, vector<string> lines) {
+	Stats result;
+	for (const string& line : lines) {
+		result += ExploreLine(key_words, line);
+	}
+	return result;
+}
 
 Stats ExploreKeyWords(const set<string>& key_words, istream& input) {
-	//int count_ss = 25000;
+	const size_t max_batch_size = 5000;
+
+	vector<string> batch;
+	batch.reserve(max_batch_size);
+
 	vector<future<Stats>> futures;
 
-	//vector<vector<string>> vss;
-	//vss.emplace_back(vector<string>());
-	//int count = 0;
-	//for (string line; getline(input, line); ) {
-	//	vss.back().emplace_back(move(line));
-	//	//vss.back() += "\n";
-	//	if (++count == count_ss) {
-	//		//futures.push_back(async(ExploreKeyWordsSingleThread, ref(key_words), ref(vss.back()) ));
-	//		vss.emplace_back(vector<string>());
-	//	}
-	//}
-
-	vector<string> vss;
 	for (string line; getline(input, line); ) {
-		vss.push_back(move(line));
+		batch.push_back(move(line));
+		if (batch.size() >= max_batch_size) {
+			futures.push_back(
+				async(ExploreBatch, ref(key_words), move(batch))
+			);
+			batch.reserve(max_batch_size);
+		}
 	}
 
-	//auto middle = vss.begin() + (vss.end() - vss.begin()) / 2;
+	Stats result;
 
-	//vector<string> temp1(make_move_iterator(vss.begin()), make_move_iterator(middle));
-	//vector<string> temp2(make_move_iterator(middle), make_move_iterator(vss.end()));
+	if (!batch.empty()) {
+		result += ExploreBatch(key_words, move(batch));
+	}
 
-	//futures.push_back(async(ExploreKeyWordsSingleThread, ref(key_words), ref(temp1)));
-	//futures.push_back(async(ExploreKeyWordsSingleThread, ref(key_words), ref(temp2)));
-
-	size_t dist = (vss.end() - vss.begin()) / 3;
-	auto middle1 = vss.begin() + dist;
-	auto middle2 = middle1 + dist;
-
-	vector<string> temp1(make_move_iterator(vss.begin()), make_move_iterator(middle1));
-	vector<string> temp2(make_move_iterator(middle1), make_move_iterator(middle2));
-	vector<string> temp3(make_move_iterator(middle2), make_move_iterator(vss.end()));
-
-	futures.push_back(async(ExploreKeyWordsSingleThread, ref(key_words), ref(temp1)));
-	futures.push_back(async(ExploreKeyWordsSingleThread, ref(key_words), ref(temp2)));
-	futures.push_back(async(ExploreKeyWordsSingleThread, ref(key_words), ref(temp3)));
-
-	Stats stats;
 	for (auto& f : futures) {
-		stats += f.get();
+		result += f.get();
 	}
 
-	return stats;
+	return result;
+}
+
+void TestSplit() {
+	const vector<string> expected1 = {
+	  "abc", "def", "ghi,", "!", "jklmnop-qrs,", "tuv"
+	};
+	ASSERT_EQUAL(Split("  abc def ghi, !  jklmnop-qrs, tuv"), expected1);
+
+	const vector<string> expected2 = { "a", "b" };
+	ASSERT_EQUAL(Split("a b      "), expected2);
+	ASSERT_EQUAL(Split(""), vector<string>());
 }
 
 void TestBasic() {
@@ -234,55 +127,39 @@ void TestBasic() {
 	ss << "Goondex really sucks, but yangle rocks. Use yangle\n";
 
 	const auto stats = ExploreKeyWords(key_words, ss);
-
-	//cout << stats << endl;
-	cout << endl << stats.word_frequences << endl << endl;
-
 	const map<string, int> expected = {
 	  {"yangle", 6},
 	  {"rocks", 2},
 	  {"sucks", 1}
 	};
-
-	cout << expected << endl << endl;
-
 	ASSERT_EQUAL(stats.word_frequences, expected);
 }
 
-void TestBasic2() {
-	const set<string> key_words = { "yangle", "rocks", "sucks", "all" };
+void TestMtAgainstSt() {
+	ifstream key_words_input("key_words.txt");
+	const auto key_words_data = ReadKeyWords(key_words_input);
+	const set<string> key_words(key_words_data.begin(), key_words_data.end());
 
-	const int max_count = 50000;
-
-	stringstream ss;
-	for (int i = 0; i < max_count; ++i) {
-		ss << "this new yangle service really rocks\n";
-		ss << "It sucks when yangle isn't available\n";
-		ss << "10 reasons why yangle is the best IT company\n";
-		ss << "yangle rocks others suck\n";
-		ss << "Goondex really sucks, but yangle rocks. Use yangle\n";
+	Stats st_stats, mt_stats;
+	{
+		ifstream text_input("text.txt");
+		LOG_DURATION("Single thread");
+		st_stats = ExploreKeyWordsSingleThread(key_words, text_input);
+	}
+	{
+		ifstream text_input("text.txt");
+		LOG_DURATION("Multi thread");
+		mt_stats = ExploreKeyWords(key_words, text_input);
 	}
 
-	const auto stats = ExploreKeyWords(key_words, ss);
-
-	//cout << stats << endl;
-	cout << endl << stats.word_frequences << endl << endl;
-
-	const map<string, int> expected = {
-	  {"yangle", 6 * max_count},
-	  {"rocks", 2 * max_count},
-	  {"sucks", 1 * max_count}
-	};
-
-	cout << expected << endl << endl;
-
-	ASSERT_EQUAL(stats.word_frequences, expected);
+	ASSERT_EQUAL(st_stats.word_frequences, mt_stats.word_frequences);
 }
 
 int main() {
 	TestRunner tr;
+	RUN_TEST(tr, TestSplit);
 	RUN_TEST(tr, TestBasic);
-	RUN_TEST(tr, TestBasic2);
+	RUN_TEST(tr, TestMtAgainstSt);
 
 #ifdef _MSC_VER
 	system("pause");
