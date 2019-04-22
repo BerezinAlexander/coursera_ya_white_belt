@@ -32,27 +32,17 @@ template <typename T>
 class Synchronized {
 public:
 	explicit Synchronized(T initial = T())
-		: value(initial)
+		: value(move(initial))
 	{
 	}
 
 	struct Access {
 		T& ref_to_value;
-		mutex& ref_m;
-
-		Access(T& ref_to_value_, mutex& ref_m_)
-			: ref_to_value(ref_to_value_), ref_m(ref_m_)
-		{
-			ref_m.lock();
-		}
-
-		~Access() {
-			ref_m.unlock();
-		}
+		lock_guard<mutex> guard;
 	};
 
 	Access GetAccess() {
-		return Access(value, m);
+		return { value, lock_guard(m) };
 	}
 
 private:
