@@ -2,102 +2,135 @@
 #include "profile.h"
 
 #include <cstdint>
-#include <iterator>
+#include <iostream>
+
 #include <numeric>
 
 #include <algorithm>
-#include <array>
-#include <iostream>
 #include <random>
-#include <vector>
-#include <list>
-#include <deque>
-
-#include <string_view>
-#include <tuple>
 #include <memory>
 #include <iterator>
 
+#include <array>
+#include <vector>
+#include <list>
+#include <deque>
+#include <queue>
+#include <tuple>
+#include <string_view>
+
 #include <future>
 #include <mutex>
+#include <thread>
 
 
 using namespace std;
 
-inline void addToMap(map<string, int>& m, const string& word) {
-	m.count(word) ? m[word]++ : m[word] = 1;
-}
-
-struct Stats {
-	map<string, int> word_frequences;
-
-	void operator += (const Stats& other) {
-		for (auto& p : other.word_frequences) {
-			word_frequences.count(p.first) ? word_frequences[p.first] += p.second 
-										   : word_frequences[p.first] = p.second;
-		}
+// Реализуйте шаблон Synchronized<T>.
+// Метод GetAccess должен возвращать структуру, в которой есть поле T& value.
+template <typename T>
+class Synchronized {
+public:
+	explicit Synchronized(T initial = T())
+		: value(initial)
+	{
 	}
+
+	struct Access {
+		T& ref_to_value;
+		mutex& ref_m;
+
+		Access(T& ref_to_value_, mutex& ref_m_)
+			: ref_to_value(ref_to_value_), ref_m(ref_m_)
+		{
+			ref_m.lock();
+		}
+
+		~Access() {
+			ref_m.unlock();
+		}
+	};
+
+	Access GetAccess() {
+		return Access(value, m);
+	}
+
+private:
+	T value;
+	mutex m;
 };
 
-Stats ExploreLine(const set<string>& key_words, const string& line) {
-	stringstream ss(line);
-	Stats stats;
-	string word;
-	while (ss >> word) {
-		if (key_words.count(word)) {
-			addToMap(stats.word_frequences, word);
+void TestConcurrentUpdate() {
+	Synchronized<string> common_string;
+
+	const size_t add_count = 50000;
+	auto updater = [&common_string, add_count] {
+		for (size_t i = 0; i < add_count; ++i) {
+			auto access = common_string.GetAccess();
+			access.ref_to_value += 'a';
+		}
+	};
+
+	auto f1 = async(updater);
+	auto f2 = async(updater);
+
+	f1.get();
+	f2.get();
+
+	ASSERT_EQUAL(common_string.GetAccess().ref_to_value.size(), 2 * add_count);
+}
+
+vector<int> Consume(Synchronized<deque<int>>& common_queue) {
+	vector<int> got;
+
+	for (;;) {
+		deque<int> q;
+
+		{
+			// Мы специально заключили эти две строчки в операторные скобки, чтобы
+			// уменьшить размер критической секции. Поток-потребитель захватывает
+			// мьютекс, перемещает всё содержимое общей очереди в свою
+			// локальную переменную и отпускает мьютекс. После этого он обрабатывает
+			// объекты в очереди за пределами критической секции, позволяя
+			// потоку-производителю параллельно помещать в очередь новые объекты.
+			//
+			// Размер критической секции существенно влияет на быстродействие
+			// многопоточных программ.
+			auto access = common_queue.GetAccess();
+			q = move(access.ref_to_value);
+		}
+
+		for (int item : q) {
+			if (item > 0) {
+				got.push_back(item);
+			}
+			else {
+				return got;
+			}
 		}
 	}
-	return stats;
 }
 
-Stats ExploreKeyWordsSingleThread(
-	const set<string>& key_words, istream& input
-) {
-	Stats result;
-	for (string line; getline(input, line); ) {
-		result += ExploreLine(key_words, line);
+void TestProducerConsumer() {
+	Synchronized<deque<int>> common_queue;
+
+	auto consumer = async(Consume, ref(common_queue));
+
+	const size_t item_count = 100000;
+	for (size_t i = 1; i <= item_count; ++i) {
+		common_queue.GetAccess().ref_to_value.push_back(i);
 	}
-	return result;
-}
+	common_queue.GetAccess().ref_to_value.push_back(-1);
 
-Stats ExploreKeyWords(const set<string>& key_words, istream& input) {
-	// Реализуйте эту функцию
-	vector<future<Stats>> futures;
-	for (string line; getline(input, line); ) {
-		futures.push_back( async(ExploreLine, ref(key_words), ref(line)) );
-	}
-
-	Stats stats;
-	for (auto& f : futures) {
-		stats += f.get();
-	}
-
-	return stats;
-}
-
-void TestBasic() {
-	const set<string> key_words = { "yangle", "rocks", "sucks", "all" };
-
-	stringstream ss;
-	ss << "this new yangle service really rocks\n";
-	ss << "It sucks when yangle isn't available\n";
-	ss << "10 reasons why yangle is the best IT company\n";
-	ss << "yangle rocks others suck\n";
-	ss << "Goondex really sucks, but yangle rocks. Use yangle\n";
-
-	const auto stats = ExploreKeyWords(key_words, ss);
-	const map<string, int> expected = {
-	  {"yangle", 6},
-	  {"rocks", 2},
-	  {"sucks", 1}
-	};
-	ASSERT_EQUAL(stats.word_frequences, expected);
+	vector<int> expected(item_count);
+	iota(begin(expected), end(expected), 1);
+	ASSERT_EQUAL(consumer.get(), expected);
 }
 
 int main() {
 	TestRunner tr;
-	RUN_TEST(tr, TestBasic);
+	RUN_TEST(tr, TestConcurrentUpdate);
+	RUN_TEST(tr, TestProducerConsumer);
 
 #ifdef _MSC_VER
 	system("pause");
