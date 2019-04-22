@@ -26,101 +26,163 @@
 
 using namespace std;
 
-// Реализуйте шаблон Synchronized<T>.
-// Метод GetAccess должен возвращать структуру, в которой есть поле T& value.
-template <typename T>
-class Synchronized {
+template <typename K, typename V>
+class ConcurrentMap {
 public:
-	explicit Synchronized(T initial = T())
-		: value(move(initial))
-	{
-	}
+	static_assert(is_integral_v<K>, "ConcurrentMap supports only integer keys");
 
 	struct Access {
-		T& ref_to_value;
+		V& ref_to_value;
 		lock_guard<mutex> guard;
 	};
 
-	Access GetAccess() {
-		return { value, lock_guard(m) };
+	explicit ConcurrentMap(size_t bucket_count)
+		: maps(bucket_count)
+		, mutexes(bucket_count)
+	{
+	}
+
+	Access operator[](const K& key) {
+		for (int i = 0; i < maps.size(); ++i) {
+			if (maps[i].count(key)) {
+				return {maps[i][key], lock_guard<mutex>(mutexes[i]) };
+			}
+		}
+
+		size_t smoller = findSmollerMap();
+		mutexes[smoller].lock();
+		maps[smoller][key] = V();
+		mutexes[smoller].unlock();
+
+		return { maps[smoller][key], lock_guard(mutexes[smoller])};
+	}
+
+	map<K, V> BuildOrdinaryMap() {
+		map<K, V> result;
+		for (int i = 0; i < maps.size(); ++i) {
+			lock_guard<mutex> g(mutexes[i]);
+			for (auto&[key, value] : maps[i]) {
+				result[key] += value;
+			}
+		}
+		return result;
 	}
 
 private:
-	T value;
-	mutex m;
+	vector<map<K, V>> maps;
+	vector<mutex> mutexes;
+
+	size_t findSmollerMap() {
+		if (maps.empty())
+			return -1;
+
+		size_t smoller = 0;
+		size_t smollerSize = 0;
+
+		//{
+		//	lock_guard<mutex> g(mutexes[0]);
+			smollerSize = maps[0].size();
+		//}
+
+		for (size_t i = 1; i < maps.size(); ++i) {
+			//lock_guard<mutex> g(mutexes[i]);
+			if (smollerSize < maps[i].size()) {
+				smoller = i;
+				smollerSize = maps[i].size();
+			}
+		}
+
+		return smoller;
+	}
 };
 
-void TestConcurrentUpdate() {
-	Synchronized<string> common_string;
+void RunConcurrentUpdates(
+	ConcurrentMap<int, int>& cm, size_t thread_count, int key_count
+) {
+	auto kernel = [&cm, key_count](int seed) {
+		vector<int> updates(key_count);
+		iota(begin(updates), end(updates), -key_count / 2);
+		shuffle(begin(updates), end(updates), default_random_engine(seed));
 
-	const size_t add_count = 50000;
-	auto updater = [&common_string, add_count] {
-		for (size_t i = 0; i < add_count; ++i) {
-			auto access = common_string.GetAccess();
-			access.ref_to_value += 'a';
+		for (int i = 0; i < 2; ++i) {
+			for (auto key : updates) {
+				cm[key].ref_to_value++;
+			}
 		}
 	};
 
-	auto f1 = async(updater);
-	auto f2 = async(updater);
-
-	f1.get();
-	f2.get();
-
-	ASSERT_EQUAL(common_string.GetAccess().ref_to_value.size(), 2 * add_count);
-}
-
-vector<int> Consume(Synchronized<deque<int>>& common_queue) {
-	vector<int> got;
-
-	for (;;) {
-		deque<int> q;
-
-		{
-			// Мы специально заключили эти две строчки в операторные скобки, чтобы
-			// уменьшить размер критической секции. Поток-потребитель захватывает
-			// мьютекс, перемещает всё содержимое общей очереди в свою
-			// локальную переменную и отпускает мьютекс. После этого он обрабатывает
-			// объекты в очереди за пределами критической секции, позволяя
-			// потоку-производителю параллельно помещать в очередь новые объекты.
-			//
-			// Размер критической секции существенно влияет на быстродействие
-			// многопоточных программ.
-			auto access = common_queue.GetAccess();
-			q = move(access.ref_to_value);
-		}
-
-		for (int item : q) {
-			if (item > 0) {
-				got.push_back(item);
-			}
-			else {
-				return got;
-			}
-		}
+	vector<future<void>> futures;
+	for (size_t i = 0; i < thread_count; ++i) {
+		futures.push_back(async(kernel, i));
 	}
 }
 
-void TestProducerConsumer() {
-	Synchronized<deque<int>> common_queue;
+void TestConcurrentUpdate() {
+	const size_t thread_count = 3;
+	const size_t key_count = 50000;
 
-	auto consumer = async(Consume, ref(common_queue));
+	ConcurrentMap<int, int> cm(thread_count);
+	RunConcurrentUpdates(cm, thread_count, key_count);
 
-	const size_t item_count = 100000;
-	for (size_t i = 1; i <= item_count; ++i) {
-		common_queue.GetAccess().ref_to_value.push_back(i);
+	const auto result = cm.BuildOrdinaryMap();
+	ASSERT_EQUAL(result.size(), key_count);
+	for (auto&[k, v] : result) {
+		AssertEqual(v, 6, "Key = " + to_string(k));
 	}
-	common_queue.GetAccess().ref_to_value.push_back(-1);
+}
 
-	vector<int> expected(item_count);
-	iota(begin(expected), end(expected), 1);
-	ASSERT_EQUAL(consumer.get(), expected);
+void TestReadAndWrite() {
+	ConcurrentMap<size_t, string> cm(5);
+
+	auto updater = [&cm] {
+		for (size_t i = 0; i < 50000; ++i) {
+			cm[i].ref_to_value += 'a';
+		}
+	};
+	auto reader = [&cm] {
+		vector<string> result(50000);
+		for (size_t i = 0; i < result.size(); ++i) {
+			result[i] = cm[i].ref_to_value;
+		}
+		return result;
+	};
+
+	auto u1 = async(updater);
+	auto r1 = async(reader);
+	auto u2 = async(updater);
+	auto r2 = async(reader);
+
+	u1.get();
+	u2.get();
+
+	for (auto f : { &r1, &r2 }) {
+		auto result = f->get();
+		ASSERT(all_of(result.begin(), result.end(), [](const string& s) {
+			return s.empty() || s == "a" || s == "aa";
+			}));
+	}
+}
+
+void TestSpeedup() {
+	{
+		ConcurrentMap<int, int> single_lock(1);
+
+		LOG_DURATION("Single lock");
+		RunConcurrentUpdates(single_lock, 4, 50000);
+	}
+	{
+		ConcurrentMap<int, int> many_locks(100);
+
+		LOG_DURATION("100 locks");
+		RunConcurrentUpdates(many_locks, 4, 50000);
+	}
 }
 
 int main() {
 	TestRunner tr;
 	RUN_TEST(tr, TestConcurrentUpdate);
-	RUN_TEST(tr, TestProducerConsumer);
+	RUN_TEST(tr, TestReadAndWrite);
+	RUN_TEST(tr, TestSpeedup);
 
 #ifdef _MSC_VER
 	system("pause");
