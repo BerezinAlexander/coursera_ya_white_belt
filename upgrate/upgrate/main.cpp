@@ -10,6 +10,7 @@
 #include <random>
 #include <memory>
 #include <iterator>
+#include <math.h>
 
 #include <array>
 #include <vector>
@@ -32,52 +33,26 @@ public:
 	static_assert(is_integral_v<K>, "ConcurrentMap supports only integer keys");
 
 	struct Access {
-		V& ref_to_value;
 		lock_guard<mutex> guard;
+		V& ref_to_value;
 	};
 
 	explicit ConcurrentMap(size_t bucket_count)
 		: segments(bucket_count)
+		, bucket_count(bucket_count)
 	{
 	}
 
 	Access operator[](const K& key) {
-		size_t indexFind = 0;
-		bool isFind = false;
-		for (int i = 0; i < segments.size(); ++i) {
-			auto& col = getSegment(i).ref_to_value;
-			if (col.count(key)) {
-				indexFind = i;
-				
-				return { segments[indexFind].col[key], lock_guard(segments[indexFind].m) };
-
-				isFind = true;
-				break;
-			}
-		}
-
-		if (!isFind) {
-			size_t smollerSize = numeric_limits<size_t>::infinity();
-			for (size_t i = 0; i < segments.size(); ++i) {
-				auto& col = getSegment(i).ref_to_value;
-				size_t curSize = col.size();
-				if (curSize < smollerSize) {
-					indexFind = i;
-					smollerSize = curSize;
-				}
-			}
-
-			return { segments[indexFind].col[key], lock_guard(segments[indexFind].m) };
-		}
-
-		//return { segments[indexFind].col[key], lock_guard(segments[indexFind].m) };
+		size_t bucket = key % bucket_count;
+		return { lock_guard<mutex>(segments[bucket].m), segments[bucket].col[key] };
 	}
 
 	map<K, V> BuildOrdinaryMap() {
 		map<K, V> result;
 		for (int i = 0; i < segments.size(); ++i) {
-			auto& col = getSegment(i).ref_to_value;
-			for (auto&[key, value] : col) {
+			lock_guard<mutex> g(segments[i].m);
+			for (auto&[key, value] : segments[i].col) {
 				result[key] += value;
 			}
 		}
@@ -85,60 +60,14 @@ public:
 	}
 
 private:
-	//vector<map<K, V>> maps;
-	//vector<mutex> mutexes;
+	size_t bucket_count;
 
 	struct Segment {
 		map<K, V> col;
 		mutex m;
 	};
-	
+
 	vector<Segment> segments;
-
-	struct RefSegment {
-		map<K, V>& ref_to_value;
-		lock_guard<mutex> guard;
-	};
-
-	RefSegment getSegment(size_t index) {
-		return { segments[index].col, lock_guard<mutex>(segments[index].m) };
-	}
-
-	//Access getOrAddValue(const K& key) {
-	//	for (auto& seg : segments) {
-	//		lock_guard<mutex> g(seg.m);
-	//		if (col.find(key) != col.end())
-	//			return { lock_guard<mutex>(seg.m), col[key] };
-	//	}
-
-	//	if(segments.empty())
-
-
-	//	size_t max_size = numeric_limits<size_t>::infinity;
-	//	auto& min_seg = segments[0];
-	//	for (auto& seg : segments) {
-	//		lock_guard<mutex> g(seg.m);
-	//		sizes.insert(seg.col.size());
-	//	}
-
-
-	//}
-
-	size_t findSmollerMap() {
-		size_t smoller = -1;
-		size_t smollerSize = -1;
-		
-		for (size_t i = 0; i < segments.size(); ++i) {
-			auto& col = getSegment(i).ref_to_value;
-			size_t curSize = col.size();
-			if (curSize < smollerSize) {
-				smoller = i;
-				smollerSize = curSize;
-			}
-		}
-
-		return smoller;
-	}
 };
 
 void RunConcurrentUpdates(
