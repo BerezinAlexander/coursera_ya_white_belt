@@ -11,6 +11,11 @@ using namespace std;
 
 vector<string> SplitIntoWords(const string& line);
 
+struct QueryResult {
+	string query;
+	vector<pair<size_t, size_t>> search_results;
+};
+
 class InvertedIndex {
 public:
   void Add(const string& document);
