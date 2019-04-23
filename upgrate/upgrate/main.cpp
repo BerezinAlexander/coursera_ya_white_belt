@@ -2,164 +2,169 @@
 #include "profile.h"
 
 #include <cstdint>
-#include <iterator>
+#include <iostream>
+
 #include <numeric>
 
-#include <iostream>
-
 #include <algorithm>
-#include <array>
-#include <iostream>
 #include <random>
+#include <memory>
+#include <iterator>
+#include <math.h>
+
+#include <array>
 #include <vector>
 #include <list>
 #include <deque>
-
-#include <string_view>
+#include <queue>
 #include <tuple>
-#include <memory>
-#include <iterator>
+#include <string_view>
 
 #include <future>
 #include <mutex>
+#include <thread>
 
 
 using namespace std;
 
-struct Stats {
-	map<string, int> word_frequences;
+template <typename T>
+T Abs(T x) {
+	return x < 0 ? -x : x;
+}
 
-	void operator += (const Stats& other) {
-		for (auto& [word, frequency] : other.word_frequences) {
-			word_frequences[word] += frequency;
+auto Lock(mutex& m) {
+	return lock_guard<mutex>{m};
+}
+
+template <typename K, typename V>
+class ConcurrentMap {
+public:
+	static_assert(
+		is_convertible_v<K, uint64_t>,
+		"ConcurrentMap supports only integer keys"
+		);
+
+	struct Access {
+		lock_guard<mutex> guard;
+		V& ref_to_value;
+
+		Access(const K& key, pair<mutex, map<K, V>>& bucket_content)
+			: guard(bucket_content.first)
+			, ref_to_value(bucket_content.second[key])
+		{
 		}
+	};
+
+	explicit ConcurrentMap(size_t bucket_count)
+		: data(bucket_count)
+	{
 	}
+
+	Access operator[](const K& key) {
+		auto& bucket = data[Abs(key) % data.size()];
+		return { key, bucket };
+	}
+
+	map<K, V> BuildOrdinaryMap() {
+		map<K, V> result;
+		for (auto&[mtx, mapping] : data) {
+			auto g = Lock(mtx);
+			result.insert(begin(mapping), end(mapping));
+		}
+		return result;
+	}
+
+private:
+	vector<pair<mutex, map<K, V>>> data;
 };
 
-set<string> ReadKeyWords(istream& is) {
-	return { istream_iterator<string>(is), istream_iterator<string>() };
-}
-
-vector<string> Split(const string& line) {
-	// http://en.cppreference.com/w/cpp/iterator/istream_iterator
-	istringstream line_splitter(line);
-	return { istream_iterator<string>(line_splitter), istream_iterator<string>() };
-}
-
-Stats ExploreLine(const set<string>& key_words, const string& line) {
-	Stats result;
-	for (const string& word : Split(line)) {
-		if (key_words.count(word) > 0) {
-			result.word_frequences[word]++;
-		}
-	}
-	return result;
-}
-
-Stats ExploreKeyWordsSingleThread(
-	const set<string>& key_words, istream& input
+void RunConcurrentUpdates(
+	ConcurrentMap<int, int>& cm, size_t thread_count, int key_count
 ) {
-	Stats result;
-	for (string line; getline(input, line); ) {
-		result += ExploreLine(key_words, line);
-	}
-	return result;
-}
+	auto kernel = [&cm, key_count](int seed) {
+		vector<int> updates(key_count);
+		iota(begin(updates), end(updates), -key_count / 2);
+		shuffle(begin(updates), end(updates), default_random_engine(seed));
 
-Stats ExploreBatch(const set<string>& key_words, vector<string> lines) {
-	Stats result;
-	for (const string& line : lines) {
-		result += ExploreLine(key_words, line);
-	}
-	return result;
-}
-
-Stats ExploreKeyWords(const set<string>& key_words, istream& input) {
-	const size_t max_batch_size = 5000;
-
-	vector<string> batch;
-	batch.reserve(max_batch_size);
-
-	vector<future<Stats>> futures;
-
-	for (string line; getline(input, line); ) {
-		batch.push_back(move(line));
-		if (batch.size() >= max_batch_size) {
-			futures.push_back(
-				async(ExploreBatch, ref(key_words), move(batch))
-			);
-			batch.reserve(max_batch_size);
+		for (int i = 0; i < 2; ++i) {
+			for (auto key : updates) {
+				cm[key].ref_to_value++;
+			}
 		}
-	}
-
-	Stats result;
-
-	if (!batch.empty()) {
-		result += ExploreBatch(key_words, move(batch));
-	}
-
-	for (auto& f : futures) {
-		result += f.get();
-	}
-
-	return result;
-}
-
-void TestSplit() {
-	const vector<string> expected1 = {
-	  "abc", "def", "ghi,", "!", "jklmnop-qrs,", "tuv"
 	};
-	ASSERT_EQUAL(Split("  abc def ghi, !  jklmnop-qrs, tuv"), expected1);
 
-	const vector<string> expected2 = { "a", "b" };
-	ASSERT_EQUAL(Split("a b      "), expected2);
-	ASSERT_EQUAL(Split(""), vector<string>());
+	vector<future<void>> futures;
+	for (size_t i = 0; i < thread_count; ++i) {
+		futures.push_back(async(kernel, i));
+	}
 }
 
-void TestBasic() {
-	const set<string> key_words = { "yangle", "rocks", "sucks", "all" };
+void TestConcurrentUpdate() {
+	const size_t thread_count = 3;
+	const size_t key_count = 50000;
 
-	stringstream ss;
-	ss << "this new yangle service really rocks\n";
-	ss << "It sucks when yangle isn't available\n";
-	ss << "10 reasons why yangle is the best IT company\n";
-	ss << "yangle rocks others suck\n";
-	ss << "Goondex really sucks, but yangle rocks. Use yangle\n";
+	ConcurrentMap<int, int> cm(thread_count);
+	RunConcurrentUpdates(cm, thread_count, key_count);
 
-	const auto stats = ExploreKeyWords(key_words, ss);
-	const map<string, int> expected = {
-	  {"yangle", 6},
-	  {"rocks", 2},
-	  {"sucks", 1}
+	const auto result = cm.BuildOrdinaryMap();
+	ASSERT_EQUAL(result.size(), key_count);
+	for (auto&[k, v] : result) {
+		AssertEqual(v, 6, "Key = " + to_string(k));
+	}
+}
+
+void TestReadAndWrite() {
+	ConcurrentMap<size_t, string> cm(5);
+
+	auto updater = [&cm] {
+		for (size_t i = 0; i < 50000; ++i) {
+			cm[i].ref_to_value += 'a';
+		}
 	};
-	ASSERT_EQUAL(stats.word_frequences, expected);
+	auto reader = [&cm] {
+		vector<string> result(50000);
+		for (size_t i = 0; i < result.size(); ++i) {
+			result[i] = cm[i].ref_to_value;
+		}
+		return result;
+	};
+
+	auto u1 = async(updater);
+	auto r1 = async(reader);
+	auto u2 = async(updater);
+	auto r2 = async(reader);
+
+	u1.get();
+	u2.get();
+
+	for (auto f : { &r1, &r2 }) {
+		auto result = f->get();
+		ASSERT(all_of(result.begin(), result.end(), [](const string& s) {
+			return s.empty() || s == "a" || s == "aa";
+			}));
+	}
 }
 
-void TestMtAgainstSt() {
-	ifstream key_words_input("key_words.txt");
-	const auto key_words_data = ReadKeyWords(key_words_input);
-	const set<string> key_words(key_words_data.begin(), key_words_data.end());
-
-	Stats st_stats, mt_stats;
+void TestSpeedup() {
 	{
-		ifstream text_input("text.txt");
-		LOG_DURATION("Single thread");
-		st_stats = ExploreKeyWordsSingleThread(key_words, text_input);
+		ConcurrentMap<int, int> single_lock(1);
+
+		LOG_DURATION("Single lock");
+		RunConcurrentUpdates(single_lock, 4, 50000);
 	}
 	{
-		ifstream text_input("text.txt");
-		LOG_DURATION("Multi thread");
-		mt_stats = ExploreKeyWords(key_words, text_input);
-	}
+		ConcurrentMap<int, int> many_locks(100);
 
-	ASSERT_EQUAL(st_stats.word_frequences, mt_stats.word_frequences);
+		LOG_DURATION("100 locks");
+		RunConcurrentUpdates(many_locks, 4, 50000);
+	}
 }
 
 int main() {
 	TestRunner tr;
-	RUN_TEST(tr, TestSplit);
-	RUN_TEST(tr, TestBasic);
-	RUN_TEST(tr, TestMtAgainstSt);
+	RUN_TEST(tr, TestConcurrentUpdate);
+	RUN_TEST(tr, TestReadAndWrite);
+	RUN_TEST(tr, TestSpeedup);
 
 #ifdef _MSC_VER
 	system("pause");
