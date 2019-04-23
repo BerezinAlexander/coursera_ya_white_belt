@@ -1,166 +1,214 @@
+#include "search_server.h"
+#include "parse.h"
 #include "test_runner.h"
-#include "profile.h"
-
-#include <cstdint>
-#include <iostream>
-
-#include <numeric>
 
 #include <algorithm>
-#include <random>
-#include <memory>
 #include <iterator>
-#include <math.h>
-
-#include <array>
+#include <map>
 #include <vector>
-#include <list>
-#include <deque>
-#include <queue>
-#include <tuple>
-#include <string_view>
-
-#include <future>
-#include <mutex>
+#include <string>
+#include <sstream>
+#include <fstream>
+#include <random>
 #include <thread>
-
-
 using namespace std;
 
-template <typename K, typename V>
-class ConcurrentMap {
-public:
-	static_assert(is_integral_v<K>, "ConcurrentMap supports only integer keys");
-
-	struct Access {
-		lock_guard<mutex> guard;
-		V& ref_to_value;
-	};
-
-	explicit ConcurrentMap(size_t bucket_count)
-		: segments(bucket_count)
-		, bucket_count(bucket_count)
-	{
-	}
-
-	Access operator[](const K& key) {
-		size_t bucket = key % bucket_count;
-		return { lock_guard<mutex>(segments[bucket].m), segments[bucket].col[key] };
-	}
-
-	map<K, V> BuildOrdinaryMap() {
-		map<K, V> result;
-		for (int i = 0; i < segments.size(); ++i) {
-			lock_guard<mutex> g(segments[i].m);
-			for (auto&[key, value] : segments[i].col) {
-				result[key] += value;
-			}
-		}
-		return result;
-	}
-
-private:
-	size_t bucket_count;
-
-	struct Segment {
-		map<K, V> col;
-		mutex m;
-	};
-
-	vector<Segment> segments;
-};
-
-void RunConcurrentUpdates(
-	ConcurrentMap<int, int>& cm, size_t thread_count, int key_count
+void TestFunctionality(
+  const vector<string>& docs,
+  const vector<string>& queries,
+  const vector<string>& expected
 ) {
-	auto kernel = [&cm, key_count](int seed) {
-		vector<int> updates(key_count);
-		iota(begin(updates), end(updates), -key_count / 2);
-		shuffle(begin(updates), end(updates), default_random_engine(seed));
+  istringstream docs_input(Join('\n', docs));
+  istringstream queries_input(Join('\n', queries));
 
-		for (int i = 0; i < 2; ++i) {
-			for (auto key : updates) {
-				cm[key].ref_to_value++;
-			}
-		}
-	};
+  SearchServer srv;
+  srv.UpdateDocumentBase(docs_input);
+  ostringstream queries_output;
+  srv.AddQueriesStream(queries_input, queries_output);
 
-	vector<future<void>> futures;
-	for (size_t i = 0; i < thread_count; ++i) {
-		futures.push_back(async(kernel, i));
-	}
+  const string result = queries_output.str();
+  const auto lines = SplitBy(Strip(result), '\n');
+  ASSERT_EQUAL(lines.size(), expected.size());
+  for (size_t i = 0; i < lines.size(); ++i) {
+    ASSERT_EQUAL(lines[i], expected[i]);
+  }
 }
 
-void TestConcurrentUpdate() {
-	const size_t thread_count = 3;
-	const size_t key_count = 50000;
+void TestSerpFormat() {
+  const vector<string> docs = {
+    "london is the capital of great britain",
+    "i am travelling down the river"
+  };
+  const vector<string> queries = {"london", "the"};
+  const vector<string> expected = {
+    "london: {docid: 0, hitcount: 1}",
+    Join(' ', vector{
+      "the:",
+      "{docid: 0, hitcount: 1}",
+      "{docid: 1, hitcount: 1}"
+    })
+  };
 
-	ConcurrentMap<int, int> cm(thread_count);
-	RunConcurrentUpdates(cm, thread_count, key_count);
-
-	const auto result = cm.BuildOrdinaryMap();
-	ASSERT_EQUAL(result.size(), key_count);
-	for (auto&[k, v] : result) {
-		AssertEqual(v, 6, "Key = " + to_string(k));
-	}
+  TestFunctionality(docs, queries, expected);
 }
 
-void TestReadAndWrite() {
-	ConcurrentMap<size_t, string> cm(5);
+void TestTop5() {
+  const vector<string> docs = {
+    "milk a",
+    "milk b",
+    "milk c",
+    "milk d",
+    "milk e",
+    "milk f",
+    "milk g",
+    "water a",
+    "water b",
+    "fire and earth"
+  };
 
-	auto updater = [&cm] {
-		for (size_t i = 0; i < 50000; ++i) {
-			cm[i].ref_to_value += 'a';
-		}
-	};
-	auto reader = [&cm] {
-		vector<string> result(50000);
-		for (size_t i = 0; i < result.size(); ++i) {
-			result[i] = cm[i].ref_to_value;
-		}
-		return result;
-	};
-
-	auto u1 = async(updater);
-	auto r1 = async(reader);
-	auto u2 = async(updater);
-	auto r2 = async(reader);
-
-	u1.get();
-	u2.get();
-
-	for (auto f : { &r1, &r2 }) {
-		auto result = f->get();
-		ASSERT(all_of(result.begin(), result.end(), [](const string& s) {
-			return s.empty() || s == "a" || s == "aa";
-			}));
-	}
+  const vector<string> queries = {"milk", "water", "rock"};
+  const vector<string> expected = {
+    Join(' ', vector{
+      "milk:",
+      "{docid: 0, hitcount: 1}",
+      "{docid: 1, hitcount: 1}",
+      "{docid: 2, hitcount: 1}",
+      "{docid: 3, hitcount: 1}",
+      "{docid: 4, hitcount: 1}"
+    }),
+    Join(' ', vector{
+      "water:",
+      "{docid: 7, hitcount: 1}",
+      "{docid: 8, hitcount: 1}",
+    }),
+    "rock:",
+  };
+  TestFunctionality(docs, queries, expected);
 }
 
-void TestSpeedup() {
-	{
-		ConcurrentMap<int, int> single_lock(1);
+void TestHitcount() {
+  const vector<string> docs = {
+    "the river goes through the entire city there is a house near it",
+    "the wall",
+    "walle",
+    "is is is is",
+  };
+  const vector<string> queries = {"the", "wall", "all", "is", "the is"};
+  const vector<string> expected = {
+    Join(' ', vector{
+      "the:",
+      "{docid: 0, hitcount: 2}",
+      "{docid: 1, hitcount: 1}",
+    }),
+    "wall: {docid: 1, hitcount: 1}",
+    "all:",
+    Join(' ', vector{
+      "is:",
+      "{docid: 3, hitcount: 4}",
+      "{docid: 0, hitcount: 1}",
+    }),
+    Join(' ', vector{
+      "the is:",
+      "{docid: 3, hitcount: 4}",
+      "{docid: 0, hitcount: 3}",
+      "{docid: 1, hitcount: 1}",
+    }),
+  };
+  TestFunctionality(docs, queries, expected);
+}
 
-		LOG_DURATION("Single lock");
-		RunConcurrentUpdates(single_lock, 4, 50000);
-	}
-	{
-		ConcurrentMap<int, int> many_locks(100);
+void TestRanking() {
+  const vector<string> docs = {
+    "london is the capital of great britain",
+    "paris is the capital of france",
+    "berlin is the capital of germany",
+    "rome is the capital of italy",
+    "madrid is the capital of spain",
+    "lisboa is the capital of portugal",
+    "bern is the capital of switzerland",
+    "moscow is the capital of russia",
+    "kiev is the capital of ukraine",
+    "minsk is the capital of belarus",
+    "astana is the capital of kazakhstan",
+    "beijing is the capital of china",
+    "tokyo is the capital of japan",
+    "bangkok is the capital of thailand",
+    "welcome to moscow the capital of russia the third rome",
+    "amsterdam is the capital of netherlands",
+    "helsinki is the capital of finland",
+    "oslo is the capital of norway",
+    "stockgolm is the capital of sweden",
+    "riga is the capital of latvia",
+    "tallin is the capital of estonia",
+    "warsaw is the capital of poland",
+  };
 
-		LOG_DURATION("100 locks");
-		RunConcurrentUpdates(many_locks, 4, 50000);
-	}
+  const vector<string> queries = {"moscow is the capital of russia"};
+  const vector<string> expected = {
+    Join(' ', vector{
+      "moscow is the capital of russia:",
+      "{docid: 7, hitcount: 6}",
+      "{docid: 14, hitcount: 6}",
+      "{docid: 0, hitcount: 4}",
+      "{docid: 1, hitcount: 4}",
+      "{docid: 2, hitcount: 4}",
+    })
+  };
+  TestFunctionality(docs, queries, expected);
+}
+
+void TestBasicSearch() {
+  const vector<string> docs = {
+    "we are ready to go",
+    "come on everybody shake you hands",
+    "i love this game",
+    "just like exception safety is not about writing try catch everywhere in your code move semantics are not about typing double ampersand everywhere in your code",
+    "daddy daddy daddy dad dad dad",
+    "tell me the meaning of being lonely",
+    "just keep track of it",
+    "how hard could it be",
+    "it is going to be legen wait for it dary legendary",
+    "we dont need no education"
+  };
+
+  const vector<string> queries = {
+    "we need some help",
+    "it",
+    "i love this game",
+    "tell me why",
+    "dislike",
+    "about"
+  };
+
+  const vector<string> expected = {
+    Join(' ', vector{
+      "we need some help:",
+      "{docid: 9, hitcount: 2}",
+      "{docid: 0, hitcount: 1}"
+    }),
+    Join(' ', vector{
+      "it:",
+      "{docid: 8, hitcount: 2}",
+      "{docid: 6, hitcount: 1}",
+      "{docid: 7, hitcount: 1}",
+    }),
+    "i love this game: {docid: 2, hitcount: 4}",
+    "tell me why: {docid: 5, hitcount: 2}",
+    "dislike:",
+    "about: {docid: 3, hitcount: 2}",
+  };
+  TestFunctionality(docs, queries, expected);
 }
 
 int main() {
-	TestRunner tr;
-	RUN_TEST(tr, TestConcurrentUpdate);
-	RUN_TEST(tr, TestReadAndWrite);
-	RUN_TEST(tr, TestSpeedup);
+  TestRunner tr;
+  RUN_TEST(tr, TestSerpFormat);
+  RUN_TEST(tr, TestTop5);
+  RUN_TEST(tr, TestHitcount);
+  RUN_TEST(tr, TestRanking);
+  RUN_TEST(tr, TestBasicSearch);
 
 #ifdef _MSC_VER
-	system("pause");
+  system("pause");
 #endif
-
-	return 0;
 }
