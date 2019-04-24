@@ -1,140 +1,96 @@
 #include "search_server.h"
+#include "parse.h"
 #include "iterator_range.h"
+#include "profile_advanced.h"
 
 #include <algorithm>
-#include <iterator>
-#include <sstream>
-#include <iostream>
-#include <future>
-#include <thread>
-#include <random>
-#include <chrono>
+#include <numeric>
 
-#include "profile.h"
-
-using namespace std::chrono;
-
-vector<string> SplitIntoWords(const string& line) {
-	istringstream words_input(line);
-	return { istream_iterator<string>(words_input), istream_iterator<string>() };
+InvertedIndex::InvertedIndex(istream& document_input) {
+  for (string current_document; getline(document_input, current_document); ) {
+    docs.push_back(move(current_document));
+    size_t docid = docs.size() - 1;
+    for (string_view word : SplitIntoWordsView(docs.back())) {
+      auto& docids = index[word];
+      if (!docids.empty() && docids.back().docid == docid) {
+        ++docids.back().hitcount;
+      } else {
+        docids.push_back({docid, 1});
+      }
+    }
+  }
 }
 
-SearchServer::SearchServer(istream& document_input)
-	: firstUpdate(true)
-{
-	UpdateDocumentBase(document_input);
-}
-
-SearchServer::SearchServer()
-	: firstUpdate(true)
-{
-}
-
-
-void SearchServer::UpdateDocumentBaseAsync(istream& document_input, SearchServer& server) {
-	InvertedIndex new_index;
-
-	for (string current_document; getline(document_input, current_document); ) {
-		new_index.Add(move(current_document));
-	}
-
-	server.index.GetAccess().ref_to_value = move(new_index);
+const vector<InvertedIndex::Entry>& InvertedIndex::Lookup(string_view word) const {
+  static const vector<Entry> empty;
+  if (auto it = index.find(word); it != index.end()) {
+    return it->second;
+  } else {
+    return empty;
+  }
 }
 
 void SearchServer::UpdateDocumentBase(istream& document_input) {
-
-	//updateIndex.push_back(async(UpdateDocumentBaseAsync, ref(document_input), ref(*this)));
-	
-	//if (firstUpdate) {
-	//	updateIndex.back().get();
-	//	firstUpdate = false;
-	//}
-
-	//this_thread::sleep_for(2s);
-
-	if (firstUpdate) {
-		InvertedIndex new_index;
-
-		for (string current_document; getline(document_input, current_document); ) {
-			new_index.Add(move(current_document));
-		}
-
-		index.GetAccess().ref_to_value = move(new_index);
-
-		firstUpdate = false;
-	}
+  index = InvertedIndex(document_input);
 }
 
 void SearchServer::AddQueriesStream(
-	istream& query_input, ostream& search_results_output
+  istream& query_input, ostream& search_results_output
 ) {
-	size_t docs_size = index.GetAccess().ref_to_value.GetDocsSize();
-	size_t vsize = (docs_size < 5) ? 5 : docs_size;
-	vector<pair<size_t, size_t>> docid_count(vsize);
+  const auto& documents = index.GetDocuments();
+  vector<size_t> docid_count(documents.size());
+  vector<int64_t> docids(documents.size());
 
-	for (string current_query; getline(query_input, current_query); ) {
-		const auto words = SplitIntoWords(current_query);
+  TotalDuration words_split("  Words split");
+  TotalDuration lookup("  Lookup");
+  TotalDuration sorting("  Sort");
+  TotalDuration build_results("  Build results");
+  TotalDuration total_iteration("  Total loop iteration");
 
-		docid_count.assign(vsize, { 0,0 });
-		for (const auto& word : words) {
-			for (auto& p : index.GetAccess().ref_to_value.Lookup(word)) {
-				docid_count[p.first].first = p.first;
-				docid_count[p.first].second += p.second;
-			}
-		}
+  for (string current_query; getline(query_input, current_query); ) {
+    ADD_DURATION(total_iteration);
 
-		size_t size_sort = (docid_count.size() < 5) ? docid_count.size() : 5;
+    vector<string_view> words;
+    {
+      ADD_DURATION(words_split);
+      words = SplitIntoWordsView(current_query);
+    };
 
-		partial_sort(
-			begin(docid_count),
-			begin(docid_count) + size_sort,
-			end(docid_count),
-			[](pair<size_t, size_t> lhs, pair<size_t, size_t> rhs) {
-				int64_t lhs_docid = lhs.first;
-				auto lhs_hit_count = lhs.second;
-				int64_t rhs_docid = rhs.first;
-				auto rhs_hit_count = rhs.second;
-				return make_pair(lhs_hit_count, -lhs_docid) > make_pair(rhs_hit_count, -rhs_docid);
-			}
-		);
+    docid_count.assign(docid_count.size(), 0);
+    {
+      ADD_DURATION(lookup);
+      for (const auto& word : words) {
+        for (const auto& [docid, hit_count] : index.Lookup(word)) {
+          docid_count[docid] += hit_count;
+        }
+      }
+    }
 
-		search_results_output << current_query << ':';
-		for (auto[docid, hitcount] : Head(docid_count, 5)) {
-			if (hitcount != 0) {
-				search_results_output << " {"
-					<< "docid: " << docid << ", "
-					<< "hitcount: " << hitcount << '}';
-			}
-		}
-		search_results_output << endl;
-	}
-}
+    iota(docids.begin(), docids.end(), 0);
+    {
+      ADD_DURATION(sorting);
+      partial_sort(
+        begin(docids),
+        Head(docids, 5).end(),
+        end(docids),
+        [&docid_count](int64_t lhs, int64_t rhs) {
+          return make_pair(docid_count[lhs], -lhs) > make_pair(docid_count[rhs], -rhs);
+        }
+      );
+    }
 
-void InvertedIndex::Add(const string& document) {
-	docs.push_back(document);
+    ADD_DURATION(build_results);
+    search_results_output << current_query << ':';
+    for (size_t docid : Head(docids, 5)) {
+      const size_t hit_count = docid_count[docid];
+      if (hit_count == 0) {
+        break;
+      }
 
-	const size_t docid = docs.size() - 1;
-	for (const auto& word : SplitIntoWords(document)) {
-		auto& vec = index[word];
-		auto it = find_if(vec.begin(), vec.end(), 
-			[&docid](const pair<size_t, size_t>& p) {
-				return docid == p.first; }
-		);
-
-		if (it == vec.end()) {
-			vec.emplace_back(docid, 1 );
-		}
-		else {
-			it->second++;
-		}
-	}
-}
-
-const vector<pair<size_t, size_t>>& InvertedIndex::Lookup(const string& word) const {
-	if (auto it = index.find(word); it != index.end()) {
-		return it->second;
-	}
-	else {
-		return {};
-	}
+      search_results_output << " {"
+          << "docid: " << docid << ", "
+          << "hitcount: " << hit_count << '}';
+    }
+    search_results_output << '\n';
+  }
 }
