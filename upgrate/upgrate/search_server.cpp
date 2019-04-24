@@ -6,69 +6,82 @@
 #include <sstream>
 #include <iostream>
 #include <future>
+#include <thread>
+#include <random>
+#include <chrono>
 
 #include "profile.h"
+
+using namespace std::chrono;
 
 vector<string> SplitIntoWords(const string& line) {
 	istringstream words_input(line);
 	return { istream_iterator<string>(words_input), istream_iterator<string>() };
 }
 
-SearchServer::SearchServer(istream& document_input) {
+SearchServer::SearchServer(istream& document_input)
+	: firstUpdate(true)
+{
 	UpdateDocumentBase(document_input);
 }
 
-void SearchServer::UpdateDocumentBase(istream& document_input) {
+SearchServer::SearchServer()
+	: firstUpdate(true)
+{
+}
+
+
+void SearchServer::UpdateDocumentBaseAsync(istream& document_input, SearchServer& server) {
 	InvertedIndex new_index;
 
 	for (string current_document; getline(document_input, current_document); ) {
 		new_index.Add(move(current_document));
 	}
 
-	index = move(new_index);
+	server.index.GetAccess().ref_to_value = move(new_index);
 }
 
-istream& ReadLine(istream& input, string& s, TotalDuration& dest) {
-	//ADD_DURATION(dest);
-	return getline(input, s);
+void SearchServer::UpdateDocumentBase(istream& document_input) {
+
+	//updateIndex.push_back(async(UpdateDocumentBaseAsync, ref(document_input), ref(*this)));
+	
+	//if (firstUpdate) {
+	//	updateIndex.back().get();
+	//	firstUpdate = false;
+	//}
+
+	//this_thread::sleep_for(2s);
+
+	if (firstUpdate) {
+		InvertedIndex new_index;
+
+		for (string current_document; getline(document_input, current_document); ) {
+			new_index.Add(move(current_document));
+		}
+
+		index.GetAccess().ref_to_value = move(new_index);
+
+		firstUpdate = false;
+	}
 }
 
 void SearchServer::AddQueriesStream(
 	istream& query_input, ostream& search_results_output
 ) {
-	TotalDuration read("new Total read");
-	TotalDuration parse("new Total parse");
-	TotalDuration count("new Total count");
-	TotalDuration search("new Total search");
-
-	size_t docs_size = index.GetDocsSize();
+	size_t docs_size = index.GetAccess().ref_to_value.GetDocsSize();
 	size_t vsize = (docs_size < 5) ? 5 : docs_size;
 	vector<pair<size_t, size_t>> docid_count(vsize);
 
-	for (string current_query; /*getline(query_input, current_query);*/ ReadLine(query_input, current_query, read); ) {
-		ADD_DURATION(parse);		
-
+	for (string current_query; getline(query_input, current_query); ) {
 		const auto words = SplitIntoWords(current_query);
-
-		ADD_DURATION(count);
 
 		docid_count.assign(vsize, { 0,0 });
 		for (const auto& word : words) {
-			for (auto& p : index.Lookup(word)) {
+			for (auto& p : index.GetAccess().ref_to_value.Lookup(word)) {
 				docid_count[p.first].first = p.first;
 				docid_count[p.first].second += p.second;
 			}
-
-			//if (docid_count.size() < 5) {
-			//	while(doc)
-			//}
-			//	docid_count.resize(5);
-			//for (const auto& p : index.Lookup(word)) {
-			//	docid_count[p.first] = p
-			//}
 		}
-
-		ADD_DURATION(count);
 
 		size_t size_sort = (docid_count.size() < 5) ? docid_count.size() : 5;
 
