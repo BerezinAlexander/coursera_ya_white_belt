@@ -21,10 +21,11 @@ void TestFunctionality(
   istringstream docs_input(Join('\n', docs));
   istringstream queries_input(Join('\n', queries));
 
-  SearchServer srv;
-  srv.UpdateDocumentBase(docs_input);
   ostringstream queries_output;
-  srv.AddQueriesStream(queries_input, queries_output);
+  {
+    SearchServer srv(docs_input);
+    srv.AddQueriesStream(queries_input, queries_output);
+  }
 
   const string result = queries_output.str();
   const auto lines = SplitBy(Strip(result), '\n');
@@ -207,9 +208,4 @@ int main() {
   RUN_TEST(tr, TestHitcount);
   RUN_TEST(tr, TestRanking);
   RUN_TEST(tr, TestBasicSearch);
-
-
-#ifdef _MSC_VER
-  system("pause");
-#endif
 }

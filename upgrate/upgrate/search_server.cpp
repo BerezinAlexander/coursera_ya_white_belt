@@ -1,9 +1,10 @@
 #include "search_server.h"
+
 #include "parse.h"
 #include "iterator_range.h"
-#include "profile_advanced.h"
 
 #include <algorithm>
+#include <future>
 #include <numeric>
 
 InvertedIndex::InvertedIndex(istream& document_input) {
@@ -30,35 +31,35 @@ const vector<InvertedIndex::Entry>& InvertedIndex::Lookup(string_view word) cons
   }
 }
 
-void SearchServer::UpdateDocumentBase(istream& document_input) {
-  index = InvertedIndex(document_input);
+void UpdateIndex(istream& document_input, Synchronized<InvertedIndex>& index) {
+  InvertedIndex new_index(document_input);
+  swap(index.GetAccess().ref_to_value, new_index);
 }
 
-void SearchServer::AddQueriesStream(
-  istream& query_input, ostream& search_results_output
+void ProcessSearches(
+  istream& query_input,
+  ostream& search_results_output,
+  Synchronized<InvertedIndex>& index_handle
 ) {
-  const auto& documents = index.GetDocuments();
-  vector<size_t> docid_count(documents.size());
-  vector<int64_t> docids(documents.size());
-
-  TotalDuration words_split("  Words split");
-  TotalDuration lookup("  Lookup");
-  TotalDuration sorting("  Sort");
-  TotalDuration build_results("  Build results");
-  TotalDuration total_iteration("  Total loop iteration");
+  vector<size_t> docid_count;
+  vector<int64_t> docids;
 
   for (string current_query; getline(query_input, current_query); ) {
-    ADD_DURATION(total_iteration);
+    const auto words = SplitIntoWordsView(current_query);
 
-    vector<string_view> words;
     {
-      ADD_DURATION(words_split);
-      words = SplitIntoWordsView(current_query);
-    };
+      auto access = index_handle.GetAccess();
 
-    docid_count.assign(docid_count.size(), 0);
-    {
-      ADD_DURATION(lookup);
+      // В отличие от однопоточной версии мы должны при каждом обращении
+      // к индексу изменять размер векторов docid_count и docids, потому что
+      // между последовательными итерациями цикла индекс может быть изменён
+      // параллельным запуском функции UpdateIndex. Соответственно в новой
+      // версии базы может быть другое количество документов.
+      const size_t doc_count = access.ref_to_value.GetDocuments().size();
+      docid_count.assign(doc_count, 0);
+      docids.resize(doc_count);
+
+      auto& index = access.ref_to_value;
       for (const auto& word : words) {
         for (const auto& [docid, hit_count] : index.Lookup(word)) {
           docid_count[docid] += hit_count;
@@ -68,18 +69,16 @@ void SearchServer::AddQueriesStream(
 
     iota(docids.begin(), docids.end(), 0);
     {
-      ADD_DURATION(sorting);
       partial_sort(
         begin(docids),
         Head(docids, 5).end(),
         end(docids),
         [&docid_count](int64_t lhs, int64_t rhs) {
-          return make_pair(docid_count[lhs], -lhs) > make_pair(docid_count[rhs], -rhs);
+          return pair(docid_count[lhs], -lhs) > pair(docid_count[rhs], -rhs);
         }
       );
     }
 
-    ADD_DURATION(build_results);
     search_results_output << current_query << ':';
     for (size_t docid : Head(docids, 5)) {
       const size_t hit_count = docid_count[docid];
@@ -93,4 +92,18 @@ void SearchServer::AddQueriesStream(
     }
     search_results_output << '\n';
   }
+}
+
+void SearchServer::UpdateDocumentBase(istream& document_input) {
+  async_tasks.push_back(async(UpdateIndex, ref(document_input), ref(index)));
+}
+
+void SearchServer::AddQueriesStream(
+  istream& query_input, ostream& search_results_output
+) {
+  async_tasks.push_back(
+    async(
+      ProcessSearches, ref(query_input), ref(search_results_output), ref(index)
+    )
+  );
 }
