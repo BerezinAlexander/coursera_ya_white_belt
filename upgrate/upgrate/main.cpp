@@ -1,211 +1,167 @@
-#include "search_server.h"
-#include "parse.h"
 #include "test_runner.h"
+#include "profile.h"
+
+#include <cstdint>
+#include <iterator>
+#include <numeric>
 
 #include <algorithm>
-#include <iterator>
-#include <map>
-#include <vector>
-#include <string>
-#include <sstream>
-#include <fstream>
+#include <array>
+#include <iostream>
 #include <random>
-#include <thread>
+#include <vector>
+#include <list>
+#include <deque>
+
+#include <string_view>
+#include <tuple>
+#include <memory>
+#include <iterator>
+#include <forward_list>
+
 using namespace std;
 
-void TestFunctionality(
-  const vector<string>& docs,
-  const vector<string>& queries,
-  const vector<string>& expected
-) {
-  istringstream docs_input(Join('\n', docs));
-  istringstream queries_input(Join('\n', queries));
+template <typename Type, typename Hasher>
+class HashSet {
+public:
+	using BucketList = forward_list<Type>;
 
-  ostringstream queries_output;
-  {
-    SearchServer srv(docs_input);
-    srv.AddQueriesStream(queries_input, queries_output);
-  }
+public:
+	explicit HashSet( size_t num_buckets, const Hasher& hasher_ = {}	) 
+		: bucket_count(num_buckets)
+		, hasher(hasher_)
+		, collection(num_buckets)
+	{}
 
-  const string result = queries_output.str();
-  const auto lines = SplitBy(Strip(result), '\n');
-  ASSERT_EQUAL(lines.size(), expected.size());
-  for (size_t i = 0; i < lines.size(); ++i) {
-    ASSERT_EQUAL(lines[i], expected[i]);
-  }
+	void Add(const Type& value) {
+		size_t index = myHasher(value);
+		BucketList& bl = collection.at(index);
+		if (find(begin(bl), end(bl), value) == bl.end()) {
+			bl.push_front(value);
+		}
+	}
+	bool Has(const Type& value) const {
+		size_t index = myHasher(value);
+		const BucketList& bl = collection[index];
+		if (find(begin(bl), end(bl), value) == bl.end()) {
+			return false;
+		}
+		return true;
+	}
+
+	void Erase(const Type& value) {
+		size_t index = myHasher(value);
+		BucketList& bl = collection.at(index);
+		if (find(begin(bl), end(bl), value) != bl.end()) {
+			bl.remove(value);
+		}
+	}
+	const BucketList& GetBucket(const Type& value) const {
+		size_t index = myHasher(value);
+		return collection.at(index);
+	}
+
+private:
+	size_t bucket_count;
+	Hasher hasher;
+	vector<BucketList> collection;
+	
+	size_t myHasher(const Type& value) const {
+		return hasher(value) % bucket_count;
+	}
+};
+
+struct IntHasher {
+	size_t operator()(int value) const {
+		// Это реальная хеш-функция из libc++, libstdc++.
+		// Чтобы она работала хорошо, std::unordered_map
+		// использует простые числа для числа бакетов
+		return value;
+	}
+};
+
+struct TestValue {
+	int value;
+
+	bool operator==(TestValue other) const {
+		return value / 2 == other.value / 2;
+	}
+};
+
+struct TestValueHasher {
+	size_t operator()(TestValue value) const {
+		return value.value / 2;
+	}
+};
+
+void TestSmoke() {
+	HashSet<int, IntHasher> hash_set(2);
+	hash_set.Add(3);
+	hash_set.Add(4);
+
+	ASSERT(hash_set.Has(3));
+	ASSERT(hash_set.Has(4));
+	ASSERT(!hash_set.Has(5));
+
+	hash_set.Erase(3);
+
+	ASSERT(!hash_set.Has(3));
+	ASSERT(hash_set.Has(4));
+	ASSERT(!hash_set.Has(5));
+
+	hash_set.Add(3);
+	hash_set.Add(5);
+
+	ASSERT(hash_set.Has(3));
+	ASSERT(hash_set.Has(4));
+	ASSERT(hash_set.Has(5));
 }
 
-void TestSerpFormat() {
-  const vector<string> docs = {
-    "london is the capital of great britain",
-    "i am travelling down the river"
-  };
-  const vector<string> queries = {"london", "the"};
-  const vector<string> expected = {
-    "london: {docid: 0, hitcount: 1}",
-    Join(' ', vector{
-      "the:",
-      "{docid: 0, hitcount: 1}",
-      "{docid: 1, hitcount: 1}"
-    })
-  };
-
-  TestFunctionality(docs, queries, expected);
+void TestEmpty() {
+	HashSet<int, IntHasher> hash_set(10);
+	for (int value = 0; value < 10000; ++value) {
+		ASSERT(!hash_set.Has(value));
+	}
 }
 
-void TestTop5() {
-  const vector<string> docs = {
-    "milk a",
-    "milk b",
-    "milk c",
-    "milk d",
-    "milk e",
-    "milk f",
-    "milk g",
-    "water a",
-    "water b",
-    "fire and earth"
-  };
-
-  const vector<string> queries = {"milk", "water", "rock"};
-  const vector<string> expected = {
-    Join(' ', vector{
-      "milk:",
-      "{docid: 0, hitcount: 1}",
-      "{docid: 1, hitcount: 1}",
-      "{docid: 2, hitcount: 1}",
-      "{docid: 3, hitcount: 1}",
-      "{docid: 4, hitcount: 1}"
-    }),
-    Join(' ', vector{
-      "water:",
-      "{docid: 7, hitcount: 1}",
-      "{docid: 8, hitcount: 1}",
-    }),
-    "rock:",
-  };
-  TestFunctionality(docs, queries, expected);
+void TestIdempotency() {
+	HashSet<int, IntHasher> hash_set(10);
+	hash_set.Add(5);
+	ASSERT(hash_set.Has(5));
+	hash_set.Add(5);
+	ASSERT(hash_set.Has(5));
+	hash_set.Erase(5);
+	ASSERT(!hash_set.Has(5));
+	hash_set.Erase(5);
+	ASSERT(!hash_set.Has(5));
 }
 
-void TestHitcount() {
-  const vector<string> docs = {
-    "the river goes through the entire city there is a house near it",
-    "the wall",
-    "walle",
-    "is is is is",
-  };
-  const vector<string> queries = {"the", "wall", "all", "is", "the is"};
-  const vector<string> expected = {
-    Join(' ', vector{
-      "the:",
-      "{docid: 0, hitcount: 2}",
-      "{docid: 1, hitcount: 1}",
-    }),
-    "wall: {docid: 1, hitcount: 1}",
-    "all:",
-    Join(' ', vector{
-      "is:",
-      "{docid: 3, hitcount: 4}",
-      "{docid: 0, hitcount: 1}",
-    }),
-    Join(' ', vector{
-      "the is:",
-      "{docid: 3, hitcount: 4}",
-      "{docid: 0, hitcount: 3}",
-      "{docid: 1, hitcount: 1}",
-    }),
-  };
-  TestFunctionality(docs, queries, expected);
-}
+void TestEquivalence() {
+	HashSet<TestValue, TestValueHasher> hash_set(10);
+	hash_set.Add(TestValue{ 2 });
+	hash_set.Add(TestValue{ 3 });
 
-void TestRanking() {
-  const vector<string> docs = {
-    "london is the capital of great britain",
-    "paris is the capital of france",
-    "berlin is the capital of germany",
-    "rome is the capital of italy",
-    "madrid is the capital of spain",
-    "lisboa is the capital of portugal",
-    "bern is the capital of switzerland",
-    "moscow is the capital of russia",
-    "kiev is the capital of ukraine",
-    "minsk is the capital of belarus",
-    "astana is the capital of kazakhstan",
-    "beijing is the capital of china",
-    "tokyo is the capital of japan",
-    "bangkok is the capital of thailand",
-    "welcome to moscow the capital of russia the third rome",
-    "amsterdam is the capital of netherlands",
-    "helsinki is the capital of finland",
-    "oslo is the capital of norway",
-    "stockgolm is the capital of sweden",
-    "riga is the capital of latvia",
-    "tallin is the capital of estonia",
-    "warsaw is the capital of poland",
-  };
+	ASSERT(hash_set.Has(TestValue{ 2 }));
+	ASSERT(hash_set.Has(TestValue{ 3 }));
 
-  const vector<string> queries = {"moscow is the capital of russia"};
-  const vector<string> expected = {
-    Join(' ', vector{
-      "moscow is the capital of russia:",
-      "{docid: 7, hitcount: 6}",
-      "{docid: 14, hitcount: 6}",
-      "{docid: 0, hitcount: 4}",
-      "{docid: 1, hitcount: 4}",
-      "{docid: 2, hitcount: 4}",
-    })
-  };
-  TestFunctionality(docs, queries, expected);
-}
+	const auto& bucket = hash_set.GetBucket(TestValue{ 2 });
+	const auto& three_bucket = hash_set.GetBucket(TestValue{ 3 });
+	ASSERT_EQUAL(&bucket, &three_bucket);
 
-void TestBasicSearch() {
-  const vector<string> docs = {
-    "we are ready to go",
-    "come on everybody shake you hands",
-    "i love this game",
-    "just like exception safety is not about writing try catch everywhere in your code move semantics are not about typing double ampersand everywhere in your code",
-    "daddy daddy daddy dad dad dad",
-    "tell me the meaning of being lonely",
-    "just keep track of it",
-    "how hard could it be",
-    "it is going to be legen wait for it dary legendary",
-    "we dont need no education"
-  };
-
-  const vector<string> queries = {
-    "we need some help",
-    "it",
-    "i love this game",
-    "tell me why",
-    "dislike",
-    "about"
-  };
-
-  const vector<string> expected = {
-    Join(' ', vector{
-      "we need some help:",
-      "{docid: 9, hitcount: 2}",
-      "{docid: 0, hitcount: 1}"
-    }),
-    Join(' ', vector{
-      "it:",
-      "{docid: 8, hitcount: 2}",
-      "{docid: 6, hitcount: 1}",
-      "{docid: 7, hitcount: 1}",
-    }),
-    "i love this game: {docid: 2, hitcount: 4}",
-    "tell me why: {docid: 5, hitcount: 2}",
-    "dislike:",
-    "about: {docid: 3, hitcount: 2}",
-  };
-  TestFunctionality(docs, queries, expected);
+	ASSERT_EQUAL(1, distance(begin(bucket), end(bucket)));
+	ASSERT_EQUAL(2, bucket.front().value);
 }
 
 int main() {
-  TestRunner tr;
-  RUN_TEST(tr, TestSerpFormat);
-  RUN_TEST(tr, TestTop5);
-  RUN_TEST(tr, TestHitcount);
-  RUN_TEST(tr, TestRanking);
-  RUN_TEST(tr, TestBasicSearch);
+	TestRunner tr;
+	RUN_TEST(tr, TestSmoke);
+	RUN_TEST(tr, TestEmpty);
+	RUN_TEST(tr, TestIdempotency);
+	RUN_TEST(tr, TestEquivalence);
+
+#ifdef _MSC_VER
+	system("pause");
+#endif
+
+	return 0;
 }
