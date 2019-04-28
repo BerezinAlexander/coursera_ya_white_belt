@@ -21,54 +21,50 @@
 
 using namespace std;
 
-template <typename Type, typename Hasher>
+template <typename Type, typename Hasher = hash<Type>>
 class HashSet {
 public:
 	using BucketList = forward_list<Type>;
 
 public:
-	explicit HashSet( size_t num_buckets, const Hasher& hasher_ = {}	) 
-		: bucket_count(num_buckets)
-		, hasher(hasher_)
-		, collection(num_buckets)
+	explicit HashSet(
+		size_t num_buckets,
+		const Hasher& hasher = {}
+	)
+		: hasher_(hasher)
+		, buckets_(num_buckets)
 	{}
 
 	void Add(const Type& value) {
-		size_t index = myHasher(value);
-		BucketList& bl = collection.at(index);
-		if (find(begin(bl), end(bl), value) == bl.end()) {
-			bl.push_front(value);
+		auto& bucket = buckets_[GetBucketIndex(value)];
+		auto it = find(begin(bucket), end(bucket), value);
+
+		if (it == bucket.end()) {
+			bucket.push_front(value);
 		}
 	}
+
 	bool Has(const Type& value) const {
-		size_t index = myHasher(value);
-		const BucketList& bl = collection[index];
-		if (find(begin(bl), end(bl), value) == bl.end()) {
-			return false;
-		}
-		return true;
+		const auto& bucket = GetBucket(value);
+		return find(begin(bucket), end(bucket), value) != bucket.end();
 	}
 
 	void Erase(const Type& value) {
-		size_t index = myHasher(value);
-		BucketList& bl = collection.at(index);
-		if (find(begin(bl), end(bl), value) != bl.end()) {
-			bl.remove(value);
-		}
+		buckets_[GetBucketIndex(value)].remove(value);
 	}
+
 	const BucketList& GetBucket(const Type& value) const {
-		size_t index = myHasher(value);
-		return collection.at(index);
+		return buckets_[GetBucketIndex(value)];
 	}
 
 private:
-	size_t bucket_count;
-	Hasher hasher;
-	vector<BucketList> collection;
-	
-	size_t myHasher(const Type& value) const {
-		return hasher(value) % bucket_count;
+	size_t GetBucketIndex(const Type& value) const {
+		return hasher_(value) % buckets_.size();
 	}
+
+private:
+	Hasher hasher_;
+	vector<BucketList> buckets_;
 };
 
 struct IntHasher {
