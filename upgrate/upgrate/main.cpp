@@ -44,42 +44,68 @@ private:
 	deque<Node> nodes;
 };
 
-Node* findMinLeft(Node* me) {
-	Node* cur = me;
-	while (cur->left)
-		cur = cur->left;
-	return cur;
-}
-
-Node* findParentWithRight(Node* me) {
-	Node* parent = me->parent;
-	Node* cur = me;
-
-	if (parent->left == cur)
-		return parent;
-
-	while (parent->right == cur) {
-		if (!parent->parent)
-			return nullptr;
-		cur = parent;
-		parent = parent->parent;
+Node* GetLeftest(Node* me) {
+	assert(me);
+	while (me->left) {
+		me = me->left;
 	}
-
-	return parent;
+	return me;
 }
 
 
 Node* Next(Node* me) {
-	if (!me->right) {
-		if (me->parent)
-			return findParentWithRight(me);
-		else
-			return nullptr;
+	assert(me);
+
+	if (me->right) {
+		return GetLeftest(me->right);
 	}
-	else if (me->right) {
-		return findMinLeft(me->right);
+
+	if (me->parent && me->parent->left == me) {
+		return me->parent;
 	}
+
+	while (me->parent && me == me->parent->right) {
+		me = me->parent;
+	}
+	return me->parent;
 }
+
+//Node* findMinLeft(Node* me) {
+//	Node* cur = me;
+//	while (cur->left)
+//		cur = cur->left;
+//	return cur;
+//}
+//
+//Node* findParentWithRight(Node* me) {
+//	Node* parent = me->parent;
+//	Node* cur = me;
+//
+//	if (parent->left == cur)
+//		return parent;
+//
+//	while (parent->right == cur) {
+//		if (!parent->parent)
+//			return nullptr;
+//		cur = parent;
+//		parent = parent->parent;
+//	}
+//
+//	return parent;
+//}
+//
+//
+//Node* Next(Node* me) {
+//	if (!me->right) {
+//		if (me->parent)
+//			return findParentWithRight(me);
+//		else
+//			return nullptr;
+//	}
+//	else if (me->right) {
+//		return findMinLeft(me->right);
+//	}
+//}
 
 
 void Test1() {
