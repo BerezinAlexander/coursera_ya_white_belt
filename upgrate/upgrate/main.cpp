@@ -1,159 +1,131 @@
 #include "test_runner.h"
-#include "profile.h"
-
-#include <cstdint>
-#include <iterator>
-#include <numeric>
-
-#include <algorithm>
-#include <array>
-#include <iostream>
-#include <random>
-#include <vector>
-#include <list>
+#include <cassert>
 #include <deque>
-
-#include <string_view>
-#include <tuple>
-#include <memory>
-#include <iterator>
-#include <forward_list>
+#include <iostream>
 
 using namespace std;
 
-template <typename Type, typename Hasher = hash<Type>>
-class HashSet {
-public:
-	using BucketList = forward_list<Type>;
 
-public:
-	explicit HashSet(
-		size_t num_buckets,
-		const Hasher& hasher = {}
-	)
-		: hasher_(hasher)
-		, buckets_(num_buckets)
+struct Node {
+	Node(int v, Node* p)
+		: value(v)
+		, parent(p)
 	{}
 
-	void Add(const Type& value) {
-		auto& bucket = buckets_[GetBucketIndex(value)];
-		auto it = find(begin(bucket), end(bucket), value);
-
-		if (it == bucket.end()) {
-			bucket.push_front(value);
-		}
-	}
-
-	bool Has(const Type& value) const {
-		const auto& bucket = GetBucket(value);
-		return find(begin(bucket), end(bucket), value) != bucket.end();
-	}
-
-	void Erase(const Type& value) {
-		buckets_[GetBucketIndex(value)].remove(value);
-	}
-
-	const BucketList& GetBucket(const Type& value) const {
-		return buckets_[GetBucketIndex(value)];
-	}
-
-private:
-	size_t GetBucketIndex(const Type& value) const {
-		return hasher_(value) % buckets_.size();
-	}
-
-private:
-	Hasher hasher_;
-	vector<BucketList> buckets_;
-};
-
-struct IntHasher {
-	size_t operator()(int value) const {
-		// Это реальная хеш-функция из libc++, libstdc++.
-		// Чтобы она работала хорошо, std::unordered_map
-		// использует простые числа для числа бакетов
-		return value;
-	}
-};
-
-struct TestValue {
 	int value;
-
-	bool operator==(TestValue other) const {
-		return value / 2 == other.value / 2;
-	}
+	Node* left = nullptr;
+	Node* right = nullptr;
+	Node* parent;
 };
 
-struct TestValueHasher {
-	size_t operator()(TestValue value) const {
-		return value.value / 2;
+
+class NodeBuilder {
+public:
+	Node* CreateRoot(int value) {
+		nodes.emplace_back(value, nullptr);
+		return &nodes.back();
 	}
+
+	Node* CreateLeftSon(Node* me, int value) {
+		assert(me->left == nullptr);
+		nodes.emplace_back(value, me);
+		me->left = &nodes.back();
+		return me->left;
+	}
+
+	Node* CreateRightSon(Node* me, int value) {
+		assert(me->right == nullptr);
+		nodes.emplace_back(value, me);
+		me->right = &nodes.back();
+		return me->right;
+	}
+
+private:
+	deque<Node> nodes;
 };
 
-void TestSmoke() {
-	HashSet<int, IntHasher> hash_set(2);
-	hash_set.Add(3);
-	hash_set.Add(4);
-
-	ASSERT(hash_set.Has(3));
-	ASSERT(hash_set.Has(4));
-	ASSERT(!hash_set.Has(5));
-
-	hash_set.Erase(3);
-
-	ASSERT(!hash_set.Has(3));
-	ASSERT(hash_set.Has(4));
-	ASSERT(!hash_set.Has(5));
-
-	hash_set.Add(3);
-	hash_set.Add(5);
-
-	ASSERT(hash_set.Has(3));
-	ASSERT(hash_set.Has(4));
-	ASSERT(hash_set.Has(5));
+Node* findMinLeft(Node* me) {
+	Node* cur = me;
+	while (cur->left)
+		cur = cur->left;
+	return cur;
 }
 
-void TestEmpty() {
-	HashSet<int, IntHasher> hash_set(10);
-	for (int value = 0; value < 10000; ++value) {
-		ASSERT(!hash_set.Has(value));
+Node* findParentWithRight(Node* me) {
+	Node* parent = me->parent;
+	Node* cur = me;
+
+	if (parent->left == cur)
+		return parent;
+
+	while (parent->right == cur) {
+		if (!parent->parent)
+			return nullptr;
+		cur = parent;
+		parent = parent->parent;
+	}
+
+	return parent;
+}
+
+
+Node* Next(Node* me) {
+	if (!me->right) {
+		if (me->parent)
+			return findParentWithRight(me);
+		else
+			return nullptr;
+	}
+	else if (me->right) {
+		return findMinLeft(me->right);
 	}
 }
 
-void TestIdempotency() {
-	HashSet<int, IntHasher> hash_set(10);
-	hash_set.Add(5);
-	ASSERT(hash_set.Has(5));
-	hash_set.Add(5);
-	ASSERT(hash_set.Has(5));
-	hash_set.Erase(5);
-	ASSERT(!hash_set.Has(5));
-	hash_set.Erase(5);
-	ASSERT(!hash_set.Has(5));
+
+void Test1() {
+	NodeBuilder nb;
+
+	Node* root = nb.CreateRoot(50);
+	ASSERT_EQUAL(root->value, 50);
+
+	Node* l = nb.CreateLeftSon(root, 2);
+	Node* min = nb.CreateLeftSon(l, 1);
+	Node* r = nb.CreateRightSon(l, 4);
+	ASSERT_EQUAL(min->value, 1);
+	ASSERT_EQUAL(r->parent->value, 2);
+
+	nb.CreateLeftSon(r, 3);
+	nb.CreateRightSon(r, 5);
+
+	r = nb.CreateRightSon(root, 100);
+	l = nb.CreateLeftSon(r, 90);
+	nb.CreateRightSon(r, 101);
+
+	nb.CreateLeftSon(l, 89);
+	r = nb.CreateRightSon(l, 91);
+
+	ASSERT_EQUAL(Next(l)->value, 91);
+	ASSERT_EQUAL(Next(root)->value, 89);
+	ASSERT_EQUAL(Next(min)->value, 2);
+	ASSERT_EQUAL(Next(r)->value, 100);
+
+	while (min) {
+		cout << min->value << '\n';
+		min = Next(min);
+	}
 }
 
-void TestEquivalence() {
-	HashSet<TestValue, TestValueHasher> hash_set(10);
-	hash_set.Add(TestValue{ 2 });
-	hash_set.Add(TestValue{ 3 });
+void TestRootOnly() {
+	NodeBuilder nb;
+	Node* root = nb.CreateRoot(42);
+	ASSERT(Next(root) == nullptr);
+};
 
-	ASSERT(hash_set.Has(TestValue{ 2 }));
-	ASSERT(hash_set.Has(TestValue{ 3 }));
-
-	const auto& bucket = hash_set.GetBucket(TestValue{ 2 });
-	const auto& three_bucket = hash_set.GetBucket(TestValue{ 3 });
-	ASSERT_EQUAL(&bucket, &three_bucket);
-
-	ASSERT_EQUAL(1, distance(begin(bucket), end(bucket)));
-	ASSERT_EQUAL(2, bucket.front().value);
-}
 
 int main() {
 	TestRunner tr;
-	RUN_TEST(tr, TestSmoke);
-	RUN_TEST(tr, TestEmpty);
-	RUN_TEST(tr, TestIdempotency);
-	RUN_TEST(tr, TestEquivalence);
+	RUN_TEST(tr, Test1);
+	RUN_TEST(tr, TestRootOnly);
 
 #ifdef _MSC_VER
 	system("pause");
