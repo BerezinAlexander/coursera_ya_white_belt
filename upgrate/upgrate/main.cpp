@@ -19,83 +19,93 @@ struct Record {
 class Database {
 public:
 	bool Put(const Record& record) {
-		if (!GetById(record.id)) {
-			records[record.id] = record;
-			Iters iters;
-			iters.iter_timestamp = timestamp_records.insert(pair(record.timestamp, &records[record.id]));
-			iters.iter_karma = karma_records.insert(pair(record.karma, &records[record.id]));
-			iters.iter_user = user_records.insert(pair(record.user, &records[record.id]));
-			id_iters[record.id] = move(iters);
-			return true;
+		auto[it, inserted] = storage.insert(
+			{ record.id, Data {record, {}, {}, {}} }
+		);
+
+		if (!inserted) {
+			return false;
 		}
-		return false;
+
+		auto& data = it->second;
+		const Record* ptr = &data.record;
+		data.timestamp_iter = timestamp_index.insert({ record.timestamp, ptr });
+		data.karma_iter = karma_index.insert({ record.karma, ptr });
+		data.user_iter = user_index.insert({ record.user, ptr });
+		return true;
 	}
 
-	const Record* GetById(const string& id) const
-	{
-		return (!records.count(id)) ? nullptr : &records.at(id);
-	}
-	
-	bool Erase(const string& id)
-	{
-		if (GetById(id)) {
-			Iters& iters = id_iters[id];
-			timestamp_records.erase(iters.iter_timestamp);
-			karma_records.erase(iters.iter_karma);
-			user_records.erase(iters.iter_user);
-			id_iters.erase(id);
-			records.erase(id);
-			return true;
+	const Record* GetById(const string& id) const {
+		auto it = storage.find(id);
+		if (it == storage.end()) {
+			return nullptr;
 		}
-		return false;
+
+		return &it->second.record;
+	}
+
+	bool Erase(const string& id) {
+		auto it = storage.find(id);
+		if (it == storage.end()) {
+			return false;
+		}
+
+		const auto& data = it->second;
+		timestamp_index.erase(data.timestamp_iter);
+		karma_index.erase(data.karma_iter);
+		user_index.erase(data.user_iter);
+		storage.erase(it);
+		return true;
 	}
 
 	template <typename Callback>
 	void RangeByTimestamp(int low, int high, Callback callback) const {
-		auto itBegin = timestamp_records.lower_bound(low);
-		auto itEnd = timestamp_records.upper_bound(high);
-		for (auto it = itBegin; it != itEnd; ++it) {
-			if (!callback(*(it->second)))
-				return;
+		auto it_begin = timestamp_index.lower_bound(low);
+		auto it_end = timestamp_index.upper_bound(high);
+		for (auto it = it_begin; it != it_end; ++it) {
+			if (!callback(*it->second)) {
+				break;
+			}
 		}
 	}
 
 	template <typename Callback>
 	void RangeByKarma(int low, int high, Callback callback) const {
-		auto itBegin = karma_records.lower_bound(low);
-		auto itEnd = karma_records.upper_bound(high);
-		for (auto it = itBegin; it != itEnd; ++it) {
-			if (!callback(*(it->second)))
-				return;
+		auto it_begin = karma_index.lower_bound(low);
+		auto it_end = karma_index.upper_bound(high);
+		for (auto it = it_begin; it != it_end; ++it) {
+			if (!callback(*it->second)) {
+				break;
+			}
 		}
 	}
 
 	template <typename Callback>
 	void AllByUser(const string& user, Callback callback) const {
-		auto itBegin = user_records.lower_bound(user);
-		auto itEnd = user_records.upper_bound(user);
-		for (auto it = itBegin; it != itEnd; ++it) {
-			if (!callback(*(it->second)))
-				return;
+		auto[it_begin, it_end] = user_index.equal_range(user);
+		for (auto it = it_begin; it != it_end; ++it) {
+			if (!callback(*it->second)) {
+				break;
+			}
 		}
 	}
 
 private:
-	using Iter1 = multimap<int, Record*>::iterator;
-	using Iter2 = multimap<string, Record*>::iterator;
+	template <typename Type>
+	using Index = multimap<Type, const Record*>;
 
-	map<string, Record> records;
-	multimap<int, Record*> timestamp_records;
-	multimap<int, Record*> karma_records;
-	multimap<string, Record*> user_records;
-
-	struct Iters {
-		Iter1 iter_timestamp;
-		Iter1 iter_karma;
-		Iter2 iter_user;
+	struct Data {
+		Record record;
+		Index<int>::iterator timestamp_iter;
+		Index<int>::iterator karma_iter;
+		Index<string>::iterator user_iter;
 	};
 
-	map<string, Iters> id_iters;
+private:
+	unordered_map<string, Data> storage;
+	Index<int> timestamp_index;
+	Index<int> karma_index;
+	Index<string> user_index;
 };
 
 void TestRangeBoundaries() {
