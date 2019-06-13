@@ -1,161 +1,114 @@
+#include "xml.h"
 #include "test_runner.h"
 
+#include <algorithm>
 #include <iostream>
-#include <map>
+#include <sstream>
+#include <vector>
 #include <string>
-#include <unordered_map>
-
 using namespace std;
 
-struct Record {
-	string id;
-	string title;
-	string user;
-	int timestamp;
-	int karma;
+struct Spending {
+	string category;
+	int amount;
 };
 
-// Реализуйте этот класс
-class Database {
-public:
-	bool Put(const Record& record) {
-		auto[it, inserted] = storage.insert(
-			{ record.id, Data {record, {}, {}, {}} }
-		);
+bool operator == (const Spending& lhs, const Spending& rhs) {
+	return lhs.category == rhs.category && lhs.amount == rhs.amount;
+}
 
-		if (!inserted) {
-			return false;
-		}
+ostream& operator << (ostream& os, const Spending& s) {
+	return os << '(' << s.category << ": " << s.amount << ')';
+}
 
-		auto& data = it->second;
-		const Record* ptr = &data.record;
-		data.timestamp_iter = timestamp_index.insert({ record.timestamp, ptr });
-		data.karma_iter = karma_index.insert({ record.karma, ptr });
-		data.user_iter = user_index.insert({ record.user, ptr });
-		return true;
+int CalculateTotalSpendings(
+	const vector<Spending>& spendings
+) {
+	int result = 0;
+	for (const Spending& s : spendings) {
+		result += s.amount;
 	}
+	return result;
+}
 
-	const Record* GetById(const string& id) const {
-		auto it = storage.find(id);
-		if (it == storage.end()) {
-			return nullptr;
-		}
-
-		return &it->second.record;
-	}
-
-	bool Erase(const string& id) {
-		auto it = storage.find(id);
-		if (it == storage.end()) {
-			return false;
-		}
-
-		const auto& data = it->second;
-		timestamp_index.erase(data.timestamp_iter);
-		karma_index.erase(data.karma_iter);
-		user_index.erase(data.user_iter);
-		storage.erase(it);
-		return true;
-	}
-
-	template <typename Callback>
-	void RangeByTimestamp(int low, int high, Callback callback) const {
-		auto it_begin = timestamp_index.lower_bound(low);
-		auto it_end = timestamp_index.upper_bound(high);
-		for (auto it = it_begin; it != it_end; ++it) {
-			if (!callback(*it->second)) {
-				break;
-			}
-		}
-	}
-
-	template <typename Callback>
-	void RangeByKarma(int low, int high, Callback callback) const {
-		auto it_begin = karma_index.lower_bound(low);
-		auto it_end = karma_index.upper_bound(high);
-		for (auto it = it_begin; it != it_end; ++it) {
-			if (!callback(*it->second)) {
-				break;
-			}
-		}
-	}
-
-	template <typename Callback>
-	void AllByUser(const string& user, Callback callback) const {
-		auto[it_begin, it_end] = user_index.equal_range(user);
-		for (auto it = it_begin; it != it_end; ++it) {
-			if (!callback(*it->second)) {
-				break;
-			}
-		}
-	}
-
-private:
-	template <typename Type>
-	using Index = multimap<Type, const Record*>;
-
-	struct Data {
-		Record record;
-		Index<int>::iterator timestamp_iter;
-		Index<int>::iterator karma_iter;
-		Index<string>::iterator user_iter;
+string MostExpensiveCategory(
+	const vector<Spending>& spendings
+) {
+	auto compare_by_amount =
+		[](const Spending& lhs, const Spending& rhs) {
+		return lhs.amount < rhs.amount;
 	};
-
-private:
-	unordered_map<string, Data> storage;
-	Index<int> timestamp_index;
-	Index<int> karma_index;
-	Index<string> user_index;
-};
-
-void TestRangeBoundaries() {
-	const int good_karma = 1000;
-	const int bad_karma = -10;
-
-	Database db;
-	db.Put({ "id1", "Hello there", "master", 1536107260, good_karma });
-	db.Put({ "id2", "O>>-<", "general2", 1536107260, bad_karma });
-
-	int count = 0;
-	db.RangeByKarma(bad_karma, good_karma, [&count](const Record&) {
-		++count;
-		return true;
-		});
-
-	ASSERT_EQUAL(2, count);
+	return max_element(begin(spendings), end(spendings),
+		compare_by_amount)->category;
 }
 
-void TestSameUser() {
-	Database db;
-	db.Put({ "id1", "Don't sell", "master", 1536107260, 1000 });
-	db.Put({ "id2", "Rethink life", "master", 1536107260, 2000 });
-
-	int count = 0;
-	db.AllByUser("master", [&count](const Record&) {
-		++count;
-		return true;
-		});
-
-	ASSERT_EQUAL(2, count);
+vector<Spending> LoadFromXml(istream& input) {
+	// Реализуйте эту функцию с помощью библиотеки xml.h
+	vector<Spending> spendings;
+	Document doc = Load(input);
+	vector<Node> nodes = doc.GetRoot().Children();
+	for (auto& node : nodes) {
+		spendings.push_back({
+			node.AttributeValue<string>("category"),
+			node.AttributeValue<int>("amount") });
+	}
+	return spendings;
 }
 
-void TestReplacement() {
-	const string final_body = "Feeling sad";
+void TestLoadFromXml() {
+	istringstream xml_input(R"(<july>
+    <spend amount="2500" category="food"></spend>
+    <spend amount="1150" category="transport"></spend>
+    <spend amount="5780" category="restaurants"></spend>
+    <spend amount="7500" category="clothes"></spend>
+    <spend amount="23740" category="travel"></spend>
+    <spend amount="12000" category="sport"></spend>
+  </july>)");
 
-	Database db;
-	db.Put({ "id", "Have a hand", "not-master", 1536107260, 10 });
-	db.Erase("id");
-	db.Put({ "id", final_body, "not-master", 1536107260, -10 });
+	const vector<Spending> spendings = LoadFromXml(xml_input);
 
-	auto record = db.GetById("id");
-	ASSERT(record != nullptr);
-	ASSERT_EQUAL(final_body, record->title);
+	const vector<Spending> expected = {
+	  {"food", 2500},
+	  {"transport", 1150},
+	  {"restaurants", 5780},
+	  {"clothes", 7500},
+	  {"travel", 23740},
+	  {"sport", 12000}
+	};
+	ASSERT_EQUAL(spendings, expected);
+}
+
+void TestXmlLibrary() {
+	// Тест демонстрирует, как пользоваться библиотекой из файла xml.h
+
+	istringstream xml_input(R"(<july>
+    <spend amount="2500" category="food"></spend>
+    <spend amount="23740" category="travel"></spend>
+    <spend amount="12000" category="sport"></spend>
+  </july>)");
+
+	Document doc = Load(xml_input);
+	const Node& root = doc.GetRoot();
+	ASSERT_EQUAL(root.Name(), "july");
+	ASSERT_EQUAL(root.Children().size(), 3u);
+
+	const Node& food = root.Children().front();
+	ASSERT_EQUAL(food.AttributeValue<string>("category"), "food");
+	ASSERT_EQUAL(food.AttributeValue<int>("amount"), 2500);
+
+	const Node& sport = root.Children().back();
+	ASSERT_EQUAL(sport.AttributeValue<string>("category"), "sport");
+	ASSERT_EQUAL(sport.AttributeValue<int>("amount"), 12000);
+
+	Node july("july", {});
+	Node transport("spend", { {"category", "transport"}, {"amount", "1150"} });
+	july.AddChild(transport);
+	ASSERT_EQUAL(july.Children().size(), 1u);
 }
 
 int main() {
 	TestRunner tr;
-	RUN_TEST(tr, TestRangeBoundaries);
-	RUN_TEST(tr, TestSameUser);
-	RUN_TEST(tr, TestReplacement);
+	RUN_TEST(tr, TestXmlLibrary);
+	RUN_TEST(tr, TestLoadFromXml);
 	return 0;
 }
