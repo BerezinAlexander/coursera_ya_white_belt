@@ -14,8 +14,7 @@ namespace Ini {
 	class Document {
 	public:
 		Section& AddSection(string name) {
-			sections.insert(make_pair(name, Section()));
-			return sections.at(name);
+			return sections[name];
 		}
 		const Section& GetSection(const string& name) const {
 			return sections.at(name);
@@ -28,45 +27,23 @@ namespace Ini {
 		unordered_map<string, Section> sections;
 	};
 
-	bool LoadSectionName(istream& input, string& sectionName) {
-		return static_cast<bool>(getline(input, sectionName, ']'));
-	}
-
-	void parseKeyValue(istream& input, string& key, string& value) {
-		getline(input, key, '=');
-		input >> value;
-	}
-
-	void LoadSection(istream& input, Section& section) {
-		string sec_str;
-		getline(input, sec_str, '[');
-		stringstream ss;
-		ss << sec_str;
-		
-		string key, value;
-		string keyValue;
-		while (ss >> keyValue) {
-			stringstream ss;
-			ss << keyValue;
-			parseKeyValue(ss, key, value);
-			section.insert({ key, value });
-		}
-	}
-
 	Document Load(istream& input) {
-		Document doc;
+		Document result;
 
-		char c;
-		input >> c;
-		if (c == '[') {
-			string sectionName;
-			while (LoadSectionName(input, sectionName)) {
-				Section& section = doc.AddSection(sectionName);
-				LoadSection(input, section);
+		Section* current_section = nullptr;
+		for (string line; getline(input, line); ) {
+			if (!line.empty()) {
+				if (line[0] == '[') {
+					current_section = &result.AddSection(line.substr(1, line.size() - 2));
+				}
+				else {
+					size_t eq_pos = line.find('=');
+					current_section->insert({ line.substr(0, eq_pos), line.substr(eq_pos + 1) });
+				}
 			}
 		}
 
-		return doc;
+		return result;
 	}
 
 }
