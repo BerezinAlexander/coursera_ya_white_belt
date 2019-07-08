@@ -1,110 +1,122 @@
-#include "json.h"
 #include "test_runner.h"
 
-#include <algorithm>
-#include <iostream>
+#include "ini.h"
+
 #include <sstream>
-#include <vector>
+
 using namespace std;
 
-struct Spending {
-	string category;
-	int amount;
-};
+void TestLoadIni() {
+	istringstream input(
+		R"(	[july]
+			food=2500
+			sport=12000
+			travel=23400
+			clothes=5200
 
-bool operator == (const Spending& lhs, const Spending& rhs) {
-	return lhs.category == rhs.category && lhs.amount == rhs.amount;
-}
+			[august]
+			food=3250
+			sport=10000
+			travel=0
+			clothes=8300
+			jewelery=25000
+		)"
+	);
 
-ostream& operator << (ostream& os, const Spending& s) {
-	return os << '(' << s.category << ": " << s.amount << ')';
-}
+	const Ini::Document doc = Ini::Load(input);
 
-int CalculateTotalSpendings(
-	const vector<Spending>& spendings
-) {
-	int result = 0;
-	for (const Spending& s : spendings) {
-		result += s.amount;
-	}
-	return result;
-}
+	ASSERT_EQUAL(doc.SectionCount(), 2u);
 
-string MostExpensiveCategory(
-	const vector<Spending>& spendings
-) {
-	auto compare_by_amount =
-		[](const Spending& lhs, const Spending& rhs) {
-		return lhs.amount < rhs.amount;
+	const Ini::Section expected_july = {
+	  {"food", "2500"},
+	  {"sport", "12000"},
+	  {"travel", "23400"},
+	  {"clothes", "5200"},
 	};
-	return max_element(begin(spendings), end(spendings),
-		compare_by_amount)->category;
-}
 
-vector<Spending> LoadFromJson(istream& input) {
-	// Реализуйте эту функцию с помощью библиотеки json.h
-	vector<Spending> spendings;
-	Document doc = Load(input);
-	vector<Node> vec = doc.GetRoot().AsArray();
-	for (const Node& node : vec) {
-		spendings.push_back({
-			node.AsMap().at("category").AsString(),
-			node.AsMap().at("amount").AsInt()});
-	}
-	return spendings;
-}
-
-void TestLoadFromJson() {
-	istringstream json_input(R"([
-    {"amount": 2500, "category": "food"},
-    {"amount": 1150, "category": "transport"},
-    {"amount": 5780, "category": "restaurants"},
-    {"amount": 7500, "category": "clothes"},
-    {"amount": 23740, "category": "travel"},
-    {"amount": 12000, "category": "sport"}
-  ])");
-
-	const vector<Spending> spendings = LoadFromJson(json_input);
-
-	const vector<Spending> expected = {
-	  {"food", 2500},
-	  {"transport", 1150},
-	  {"restaurants", 5780},
-	  {"clothes", 7500},
-	  {"travel", 23740},
-	  {"sport", 12000}
+	const Ini::Section expected_august = {
+	  {"food", "3250"},
+	  {"sport", "10000"},
+	  {"travel", "0"},
+	  {"clothes", "8300"},
+	  {"jewelery", "25000"},
 	};
-	ASSERT_EQUAL(spendings, expected);
+
+	ASSERT_EQUAL(doc.GetSection("july"), expected_july);
+	ASSERT_EQUAL(doc.GetSection("august"), expected_august);
 }
 
-void TestJsonLibrary() {
-	// Тест демонстрирует, как пользоваться библиотекой из файла json.h
+void TestDocument() {
+	Ini::Document doc;
+	ASSERT_EQUAL(doc.SectionCount(), 0u);
 
-	istringstream json_input(R"([
-    {"amount": 2500, "category": "food"},
-    {"amount": 1150, "category": "transport"},
-    {"amount": 12000, "category": "sport"}
-  ])");
+	// Обратите внимание, как мы используем указатель для работы
+	// с последней добавленной секцией. Эта техника может вам пригодиться
+	// для реализации функции Load
+	Ini::Section* section = &doc.AddSection("one");
+	ASSERT_EQUAL(doc.SectionCount(), 1u);
 
-	Document doc = Load(json_input);
-	const vector<Node>& root = doc.GetRoot().AsArray();
-	ASSERT_EQUAL(root.size(), 3u);
+	section->insert({ "name_1", "value_1" });
+	section->insert({ "name_2", "value_2" });
 
-	const map<string, Node>& food = root.front().AsMap();
-	ASSERT_EQUAL(food.at("category").AsString(), "food");
-	ASSERT_EQUAL(food.at("amount").AsInt(), 2500);
+	section = &doc.AddSection("two");
+	section->insert({ "name_1", "value_1" });
+	section->insert({ "name_2", "value_2" });
+	section->insert({ "name_3", "value_3" });
 
-	const map<string, Node>& sport = root.back().AsMap();
-	ASSERT_EQUAL(sport.at("category").AsString(), "sport");
-	ASSERT_EQUAL(sport.at("amount").AsInt(), 12000);
+	section = &doc.AddSection("three");
+	section->insert({ "name_1", "value_1" });
 
-	Node transport(map<string, Node>{ {"category", Node("transport")}, { "amount", Node(1150) }});
-	Node array_node(vector<Node>{transport});
-	ASSERT_EQUAL(array_node.AsArray().size(), 1u);
+	ASSERT_EQUAL(doc.SectionCount(), 3u);
+	const Ini::Section expected_one = { {"name_1", "value_1"}, {"name_2", "value_2"} };
+	const Ini::Section expected_two = {
+	  {"name_1", "value_1"}, {"name_2", "value_2"}, {"name_3", "value_3"}
+	};
+	const Ini::Section expected_three = { {"name_1", "value_1"} };
+
+	ASSERT_EQUAL(doc.GetSection("one"), expected_one);
+	ASSERT_EQUAL(doc.GetSection("two"), expected_two);
+	ASSERT_EQUAL(doc.GetSection("three"), expected_three);
+}
+
+void TestUnknownSection() {
+	Ini::Document doc;
+	doc.AddSection("primary");
+
+	try {
+		doc.GetSection("secondary");
+		Assert(
+			false,
+			"Ini::Document::GetSection() should throw std::out_of_range for unknown section"
+		);
+	}
+	catch (out_of_range&) {
+	}
+	catch (...) {
+		Assert(
+			false,
+			"Ini::Document::GetSection() throws unexpected exception for unknown section"
+		);
+	}
+}
+
+void TestDuplicateSections() {
+	Ini::Document doc;
+	doc.AddSection("one").insert({ "key_1", "value_1" });
+	doc.AddSection("one").insert({ "key_2", "value_2" });
+
+	const Ini::Section expected = { {"key_1", "value_1"}, {"key_2", "value_2"} };
+	ASSERT_EQUAL(doc.GetSection("one"), expected);
 }
 
 int main() {
 	TestRunner tr;
-	RUN_TEST(tr, TestJsonLibrary);
-	RUN_TEST(tr, TestLoadFromJson);
+	RUN_TEST(tr, TestLoadIni);
+	RUN_TEST(tr, TestDocument);
+	RUN_TEST(tr, TestUnknownSection);
+	RUN_TEST(tr, TestDuplicateSections);
+
+	//system("pause");
+
+	return 0;
 }

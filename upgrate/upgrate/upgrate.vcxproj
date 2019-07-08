@@ -118,16 +118,12 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp" />
-    <ClCompile Include="parse.cpp" />
     <ClCompile Include="profile_advanced.cpp" />
-    <ClCompile Include="search_server.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="iterator_range.h" />
-    <ClInclude Include="parse.h" />
+    <ClInclude Include="ini.h" />
     <ClInclude Include="profile.h" />
     <ClInclude Include="profile_advanced.h" />
-    <ClInclude Include="search_server.h" />
     <ClInclude Include="test_runner.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
