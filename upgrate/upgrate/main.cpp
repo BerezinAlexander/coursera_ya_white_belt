@@ -1,305 +1,198 @@
-#include "test_runner.h"
-
+#include <algorithm>
+#include <iostream>
 #include <vector>
 #include <string>
-#include <iostream>
+#include <numeric>
 #include <sstream>
-#include <utility>
 #include <map>
-#include <optional>
-#include <unordered_set>
+#include <functional>
+#include <algorithm>
+#include <set>
 
 using namespace std;
 
-struct HttpRequest {
-	string method, path, body;
-	map<string, string> get_params;
-};
-
-pair<string, string> SplitBy(const string& what, const string& by) {
-	size_t pos = what.find(by);
-	if (by.size() < what.size() && pos < what.size() - by.size()) {
-		return { what.substr(0, pos), what.substr(pos + by.size()) };
-	}
-	else {
-		return { what, {} };
-	}
-}
-
-template<typename T>
-T FromString(const string& s) {
-	T x;
-	istringstream is(s);
-	is >> x;
-	return x;
-}
-
-enum class HttpCode {
-	Ok = 200,
-	NotFound = 404,
-	Found = 302,
-};
-
-ostream& operator<<(ostream& output, HttpCode code) {
-	switch (code) {
-	case HttpCode::Ok:
-		output << "200 OK";
-		break;
-	case HttpCode::Found:
-		output << "302 Found";
-		break;
-	case HttpCode::NotFound:
-		output << "404 Not found";
-		break;
-	default:
-		throw invalid_argument("Unknown http code");
-	}
-	return output;
-}
-
-struct HttpHeader {
-	string name, value;
-};
-
-ostream& operator<<(ostream& output, const HttpHeader& h) {
-	return output << h.name << ": " << h.value;
-}
-
-class HttpResponse {
+template <typename Iterator>
+class IteratorRange {
 public:
-	explicit HttpResponse(HttpCode code) : code(code) {
-	}
-
-	HttpResponse& AddHeader(string name, string value) {
-		headers.push_back(HttpHeader{ std::move(name), std::move(value) });
-		return *this;
-	}
-
-	HttpResponse& SetContent(string a_content) {
-		content = std::move(a_content);
-		return *this;
-	}
-
-	HttpResponse& SetCode(HttpCode a_code) {
-		code = a_code;
-		return *this;
-	}
-
-	friend ostream& operator << (ostream& output, const HttpResponse& resp) {
-		output << "HTTP/1.1 " << resp.code << '\n';
-		for (const auto&[name, value] : resp.headers) {
-			output << name << ": " << value << '\n';
-		}
-		if (!resp.content.empty()) {
-			output << "Content-Length: " << resp.content.size() << '\n';
-		}
-		return output << '\n' << resp.content;
-	}
-
-private:
-	HttpCode code;
-	vector<HttpHeader> headers;
-	string content;
-};
-
-pair<size_t, string> ParseIdAndContent(const string& body) {
-	auto[id_string, content] = SplitBy(body, " ");
-	return { FromString<size_t>(id_string), content };
-}
-
-struct LastCommentInfo {
-	size_t user_id, consecutive_count;
-};
-
-class CommentServer {
-private:
-	vector<vector<string>> comments_;
-	std::optional<LastCommentInfo> last_comment;
-	unordered_set<size_t> banned_users;
-
-public:
-	HttpResponse ServeRequest(const HttpRequest& req) {
-		if (req.method == "POST") {
-			if (req.path == "/add_user") {
-				return ServeAddUser(req);
-			}
-			else if (req.path == "/add_comment") {
-				return ServeAddComment(req);
-			}
-			else if (req.path == "/checkcaptcha") {
-				return ServeCheckCaptcha(req);
-			}
-			else {
-				return HttpResponse(HttpCode::NotFound);
-			}
-		}
-		else if (req.method == "GET") {
-			if (req.path == "/user_comments") {
-				return ServeUserComments(req);
-			}
-			else if (req.path == "/captcha") {
-				return ServeCaptcha(req);
-			}
-			else {
-				return HttpResponse(HttpCode::NotFound);
-			}
-		}
-		else {
-			return HttpResponse(HttpCode::NotFound);
-		}
-	}
-
-private:
-	HttpResponse ServeAddUser(const HttpRequest& request) {
-		comments_.emplace_back();
-		return HttpResponse(HttpCode::Ok).SetContent(to_string(comments_.size() - 1));
-	}
-
-	HttpResponse ServeAddComment(const HttpRequest& request) {
-		auto[user_id, comment] = ParseIdAndContent(request.body);
-
-		if (!last_comment || last_comment->user_id != user_id) {
-			last_comment = LastCommentInfo{ user_id, 1 };
-		}
-		else if (++last_comment->consecutive_count > 3) {
-			banned_users.insert(user_id);
-		}
-
-		if (banned_users.count(user_id) == 0) {
-			comments_[user_id].push_back(comment);
-			return HttpResponse(HttpCode::Ok);
-		}
-		else {
-			return HttpResponse(HttpCode::Found).AddHeader("Location", "/captcha");
-		}
-	}
-
-	HttpResponse ServeCheckCaptcha(const HttpRequest& request) {
-		if (auto[id, response] = ParseIdAndContent(request.body); response == "42") {
-			banned_users.erase(id);
-			if (last_comment && last_comment->user_id == id) {
-				last_comment.reset();
-			}
-			return HttpResponse(HttpCode::Ok);
-		}
-		else {
-			return HttpResponse(HttpCode::Found).AddHeader("Location", "/captcha");
-		}
-	}
-
-	HttpResponse ServeUserComments(const HttpRequest& request) {
-		auto user_id = FromString<size_t>(request.get_params.at("user_id"));
-		string response;
-		for (const string& c : comments_[user_id]) {
-			response += c + '\n';
-		}
-
-		return HttpResponse(HttpCode::Ok).SetContent(std::move(response));
-	}
-
-	HttpResponse ServeCaptcha(const HttpRequest&) {
-		return HttpResponse(HttpCode::Ok)
-			.SetContent(
-				"What's the answer for The Ultimate Question of Life, the Universe, and Everything?"
-			);
-	}
-};
-
-struct ParsedResponse {
-	int code;
-	vector<HttpHeader> headers;
-	string content;
-};
-
-istream& operator >>(istream& input, ParsedResponse& r) {
-	string line;
-	getline(input, line);
-
+	IteratorRange(Iterator begin, Iterator end)
+		: first(begin)
+		, last(end)
 	{
-		istringstream code_input(line);
-		string dummy;
-		code_input >> dummy >> r.code;
 	}
 
-	size_t content_length = 0;
+	Iterator begin() const {
+		return first;
+	}
 
-	r.headers.clear();
-	while (getline(input, line) && !line.empty()) {
-		if (auto[name, value] = SplitBy(line, ": "); name == "Content-Length") {
-			istringstream length_input(value);
-			length_input >> content_length;
+	Iterator end() const {
+		return last;
+	}
+
+private:
+	Iterator first, last;
+};
+
+template <typename Collection>
+auto Head(Collection& v, size_t top) {
+	return IteratorRange{ v.begin(), next(v.begin(), min(top, v.size())) };
+}
+
+struct Person {
+	string name;
+	int age, income;
+	bool is_male;
+};
+
+class PeopleStore {
+public:
+	PeopleStore() = default;
+
+	void AddPerson(Person& p) {
+		people.emplace_back(move(p));
+		const Person& person = people.back();
+
+		incomeId.insert(person.income);
+		ageId.insert(person.age);
+		
+		(person.is_male) ? maleNames[person.name]++ : famaleNames[person.name]++;
+	}
+
+	const vector<Person>& getPeople() const { return people; }
+	const multiset<int, greater<int>>& getIncomePeople() const { return incomeId; }
+	const multiset<int>& getAgePeolpe() const { return ageId; }
+
+	void calcPopularNames() {
+		auto el1 = max_element(maleNames.begin(), maleNames.end(),
+			[](const pair<string, int>& p1, const pair<string, int>& p2) {
+				return p1.second < p2.second;
+			}
+		);
+
+		if (el1 != maleNames.end())
+			maleNamePop = el1->first;
+
+		auto el2 = max_element(famaleNames.begin(), famaleNames.end(),
+			[](const pair<string, int>& p1, const pair<string, int>& p2) {
+				return p1.second < p2.second;
+			}
+		);
+		
+		if (el2 != famaleNames.end())
+			famaleNamePop = el2->first;
+	}
+
+	string getPopularNameMale() const {
+		return maleNamePop;
+	}
+
+	string getPopularNameFamale() const {
+		return famaleNamePop;
+	}
+
+private:
+	vector<Person> people;
+	multiset<int, greater<int>> incomeId;
+	multiset<int> ageId;
+	map<string, size_t> maleNames;
+	map<string, size_t> famaleNames;
+	string maleNamePop;
+	string famaleNamePop;
+};
+
+PeopleStore ReadPeople(istream& input) {
+	int count;
+	input >> count;
+
+	PeopleStore result;
+	for(int i=0; i< count; ++i){
+		Person p;
+		char gender;
+		input >> p.name >> p.age >> p.income >> gender;
+		p.is_male = (gender == 'M');
+		result.AddPerson(p);
+	}
+
+	return result;
+}
+
+int program(istream& input) {
+	PeopleStore peopleStore = ReadPeople(input);
+	peopleStore.calcPopularNames();
+	const vector<Person>& people = peopleStore.getPeople();
+
+	for (string command; input >> command; ) {
+		if (command == "AGE") {
+			int adult_age;
+			input >> adult_age;
+
+			const auto& ages = peopleStore.getAgePeolpe();
+			auto adult_begin = ages.lower_bound(adult_age);
+
+			cout << "There are " << std::distance(adult_begin, end(ages))
+				<< " adult people for maturity age " << adult_age << '\n';
 		}
-		else {
-			r.headers.push_back({ std::move(name), std::move(value) });
+		else if (command == "WEALTHY") {
+			int count;
+			input >> count;
+
+			const auto& incomePeople = peopleStore.getIncomePeople();			
+			count = (count < incomePeople.size()) ? count : incomePeople.size();
+
+			int total_income = accumulate(
+				incomePeople.begin(), next(incomePeople.begin(), count), 0, [](int cur, int income) {
+					return cur += income;
+				}
+			);
+
+			cout << "Top-" << count << " people have total income " << total_income << '\n';
+		}
+		else if (command == "POPULAR_NAME") {
+			char gender;
+			input >> gender;
+
+			string genderCount = (gender == 'M') 
+					? peopleStore.getPopularNameMale() 
+					: peopleStore.getPopularNameFamale();
+
+			cout << "Most popular name among people of gender " << gender << " is "
+				<< genderCount << '\n';
 		}
 	}
 
-	r.content.resize(content_length);
-	input.read(r.content.data(), r.content.size());
-	return input;
-}
-
-void Test(CommentServer& srv, const HttpRequest& request, const ParsedResponse& expected) {
-	stringstream ss;
-	HttpResponse httpResp = srv.ServeRequest(request);
-	ss << httpResp;
-	//srv.ServeRequest(request, ss);
-	ParsedResponse resp;
-	ss >> resp;
-	ASSERT_EQUAL(resp.code, expected.code);
-	ASSERT_EQUAL(resp.headers, expected.headers);
-	ASSERT_EQUAL(resp.content, expected.content);
-}
-
-template <typename CommentServer>
-void TestServer() {
-	CommentServer cs;
-
-	const ParsedResponse ok{ 200 };
-	const ParsedResponse redirect_to_captcha{ 302, {{"Location", "/captcha"}}, {} };
-	const ParsedResponse not_found{ 404 };
-
-	Test(cs, { "POST", "/add_user" }, { 200, {}, "0" });
-	Test(cs, { "POST", "/add_user" }, { 200, {}, "1" });
-	Test(cs, { "POST", "/add_comment", "0 Hello" }, ok);
-	Test(cs, { "POST", "/add_comment", "1 Hi" }, ok);
-	Test(cs, { "POST", "/add_comment", "1 Buy my goods" }, ok);
-	Test(cs, { "POST", "/add_comment", "1 Enlarge" }, ok);
-	Test(cs, { "POST", "/add_comment", "1 Buy my goods" }, redirect_to_captcha);
-	Test(cs, { "POST", "/add_comment", "0 What are you selling?" }, ok);
-	Test(cs, { "POST", "/add_comment", "1 Buy my goods" }, redirect_to_captcha);
-	Test(
-		cs,
-		{ "GET", "/user_comments", "", {{"user_id", "0"}} },
-		{ 200, {}, "Hello\nWhat are you selling?\n" }
-	);
-	Test(
-		cs,
-		{ "GET", "/user_comments", "", {{"user_id", "1"}} },
-		{ 200, {}, "Hi\nBuy my goods\nEnlarge\n" }
-	);
-	Test(
-		cs,
-		{ "GET", "/captcha" },
-		{ 200, {}, {"What's the answer for The Ultimate Question of Life, the Universe, and Everything?"} }
-	);
-	Test(cs, { "POST", "/checkcaptcha", "1 24" }, redirect_to_captcha);
-	Test(cs, { "POST", "/checkcaptcha", "1 42" }, ok);
-	Test(cs, { "POST", "/add_comment", "1 Sorry! No spam any more" }, ok);
-	Test(
-		cs,
-		{ "GET", "/user_comments", "", {{"user_id", "1"}} },
-		{ 200, {}, "Hi\nBuy my goods\nEnlarge\nSorry! No spam any more\n" }
-	);
-
-	Test(cs, { "GET", "/user_commntes" }, not_found);
-	Test(cs, { "POST", "/add_uesr" }, not_found);
-}
-
-int main() {
-	TestRunner tr;
-	RUN_TEST(tr, TestServer<CommentServer>);
-
-	//system("pause");
 	return 0;
 }
+
+#ifdef _MSC_VER
+	int main() {
+		string testInput = "11 \
+			Ivan 25 1000 M \
+			Olga 30 623 W \
+			Sergey 24 825 M \
+			Maria 42 1254 W \
+			Mikhail 15 215 M \
+			Oleg 18 230 M \
+			Denis 53 8965 M \
+			Maxim 37 9050 M \
+			Ivan 47 19050 M \
+			Ivan 17 50 M \
+			Olga 23 550 W \
+			AGE 18 \
+			AGE 25 \
+			WEALTHY 5 \
+			WEALTHY 11 \
+			WEALTHY 20 \
+			POPULAR_NAME M \
+			POPULAR_NAME W";
+
+		stringstream ss(testInput);
+
+		int result = program(ss);
+
+		system("pause");
+		return result;
+	}
+#else
+	int main() {
+		return program(cin);
+	}
+#endif
