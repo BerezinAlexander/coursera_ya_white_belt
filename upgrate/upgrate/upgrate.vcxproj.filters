@@ -21,10 +21,10 @@
     <ClCompile Include="profile_advanced.cpp">
       <Filter>Исходные файлы</Filter>
     </ClCompile>
-    <ClCompile Include="json.cpp">
+    <ClCompile Include="stats_aggregator.cpp">
       <Filter>Исходные файлы</Filter>
     </ClCompile>
-    <ClCompile Include="xml.cpp">
+    <ClCompile Include="stats_aggregator_test.cpp">
       <Filter>Исходные файлы</Filter>
     </ClCompile>
   </ItemGroup>
@@ -38,10 +38,7 @@
     <ClInclude Include="profile_advanced.h">
       <Filter>Файлы заголовков</Filter>
     </ClInclude>
-    <ClInclude Include="json.h">
-      <Filter>Файлы заголовков</Filter>
-    </ClInclude>
-    <ClInclude Include="xml.h">
+    <ClInclude Include="stats_aggregator.h">
       <Filter>Файлы заголовков</Filter>
     </ClInclude>
   </ItemGroup>
