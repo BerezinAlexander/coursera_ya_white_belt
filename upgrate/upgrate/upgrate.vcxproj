@@ -117,15 +117,15 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="geo2d.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="profile_advanced.cpp" />
-    <ClCompile Include="stats_aggregator.cpp" />
-    <ClCompile Include="stats_aggregator_test.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="game_object.h" />
+    <ClInclude Include="geo2d.h" />
     <ClInclude Include="profile.h" />
     <ClInclude Include="profile_advanced.h" />
-    <ClInclude Include="stats_aggregator.h" />
     <ClInclude Include="test_runner.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

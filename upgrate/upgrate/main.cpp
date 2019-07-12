@@ -1,59 +1,148 @@
+#include "geo2d.h"
+#include "game_object.h"
+
 #include "test_runner.h"
-#include "stats_aggregator.h"
 
 #include <vector>
-#include <string>
-#include <map>
 #include <memory>
-#include <iostream>
-#include <unordered_map>
-#include <functional>
+
 using namespace std;
 
-void TestAll();
+// Определите классы Unit, Building, Tower и Fence так, чтобы они наследовались от
+// GameObject и реализовывали его интерфейс.
 
-unique_ptr<StatsAggregator> ReadAggregators(istream& input) {
-	const unordered_map<string, std::function<unique_ptr<StatsAggregator>()>> known_builders = {
-	  {"sum", [] { return make_unique<StatsAggregators::Sum>(); }},
-	  {"min", [] { return make_unique<StatsAggregators::Min>(); }},
-	  {"max", [] { return make_unique<StatsAggregators::Max>(); }},
-	  {"avg", [] { return make_unique<StatsAggregators::Average>(); }},
-	  {"mode", [] { return make_unique<StatsAggregators::Mode>(); }}
+class Unit : public GameObject {
+public:
+	explicit Unit(geo2d::Point position) : param(position)	{}
+	bool Collide(const GameObject& that) const override { return that.CollideWith(*this); }
+	bool CollideWith(const Unit& that) const override { return geo2d::Collide(param, that.getParam()); }
+	bool CollideWith(const Building& that) const override;
+	bool CollideWith(const Tower& that) const override;
+	bool CollideWith(const Fence& that) const override;
+	geo2d::Point getParam() const { return param; }
+private:
+	geo2d::Point param;
+};
+
+class Building : public GameObject {
+public:
+	explicit Building(geo2d::Rectangle geometry) : param(geometry) {}
+	bool Collide(const GameObject& that) const override { return that.CollideWith(*this); }
+	bool CollideWith(const Unit& that) const override { return geo2d::Collide(param, that.getParam()); }
+	bool CollideWith(const Building& that) const override { return geo2d::Collide(param, that.getParam()); }
+	bool CollideWith(const Tower& that) const override;
+	bool CollideWith(const Fence& that) const override;
+	geo2d::Rectangle getParam() const { return param; }
+private:
+	geo2d::Rectangle param;
+};
+
+class Tower : public GameObject {
+public:
+	explicit Tower(geo2d::Circle geometry) : param(geometry) {}
+	bool Collide(const GameObject& that) const override { return that.CollideWith(*this); }
+	bool CollideWith(const Unit& that) const override { return geo2d::Collide(param, that.getParam()); }
+	bool CollideWith(const Building& that) const override { return geo2d::Collide(param, that.getParam()); }
+	bool CollideWith(const Tower& that) const override { return geo2d::Collide(param, that.getParam()); }
+	bool CollideWith(const Fence& that) const override;
+	geo2d::Circle getParam() const { return param; }
+private:
+	geo2d::Circle param;
+};
+
+class Fence : public GameObject {
+public:
+	explicit Fence(geo2d::Segment geometry) : param(geometry) {}
+	bool Collide(const GameObject& that) const override { return that.CollideWith(*this); }
+	bool CollideWith(const Unit& that) const override { return geo2d::Collide(param, that.getParam()); }
+	bool CollideWith(const Building& that) const override { return geo2d::Collide(param, that.getParam()); }
+	bool CollideWith(const Tower& that) const override { return geo2d::Collide(param, that.getParam()); }
+	bool CollideWith(const Fence& that) const override { return geo2d::Collide(param, that.getParam()); }
+	geo2d::Segment getParam() const { return param; }
+private:
+	geo2d::Segment param;
+};
+
+bool Unit::CollideWith(const Building& that) const { 
+	return geo2d::Collide(param, that.getParam()); 
+}
+bool Unit::CollideWith(const Tower& that) const { 
+	return geo2d::Collide(param, that.getParam()); 
+}
+bool Unit::CollideWith(const Fence& that) const {
+	return geo2d::Collide(param, that.getParam()); 
+}
+
+bool Building::CollideWith(const Tower& that) const {
+	return geo2d::Collide(param, that.getParam()); 
+}
+bool Building::CollideWith(const Fence& that) const {
+	return geo2d::Collide(param, that.getParam()); 
+}
+
+bool Tower::CollideWith(const Fence& that) const {
+	return geo2d::Collide(param, that.getParam()); 
+}
+
+// Реализуйте функцию Collide из файла GameObject.h
+
+bool Collide(const GameObject& first, const GameObject& second) {
+	return first.Collide(second);
+}
+
+void TestAddingNewObjectOnMap() {
+	// Юнит-тест моделирует ситуацию, когда на игровой карте уже есть какие-то объекты,
+	// и мы хотим добавить на неё новый, например, построить новое здание или башню.
+	// Мы можем его добавить, только если он не пересекается ни с одним из существующих.
+	using namespace geo2d;
+
+	const vector<shared_ptr<GameObject>> game_map = {
+	  make_shared<Unit>(Point{3, 3}),
+	  make_shared<Unit>(Point{5, 5}),
+	  make_shared<Unit>(Point{3, 7}),
+	  make_shared<Fence>(Segment{{7, 3}, {9, 8}}),
+	  make_shared<Tower>(Circle{Point{9, 4}, 1}),
+	  make_shared<Tower>(Circle{Point{10, 7}, 1}),
+	  make_shared<Building>(Rectangle{{11, 4}, {14, 6}})
 	};
 
-	auto result = make_unique<StatsAggregators::Composite>();
+	for (size_t i = 0; i < game_map.size(); ++i) {
+		Assert(
+			Collide(*game_map[i], *game_map[i]),
+			"An object doesn't collide with itself: " + to_string(i)
+		);
 
-	int aggr_count;
-	input >> aggr_count;
-
-	string line;
-	for (int i = 0; i < aggr_count; ++i) {
-		input >> line;
-		result->Add(known_builders.at(line)());
+		for (size_t j = 0; j < i; ++j) {
+			Assert(
+				!Collide(*game_map[i], *game_map[j]),
+				"Unexpected collision found " + to_string(i) + ' ' + to_string(j)
+			);
+		}
 	}
 
-	return result;
+	auto new_warehouse = make_shared<Building>(Rectangle{ {4, 3}, {9, 6} });
+	ASSERT(!Collide(*new_warehouse, *game_map[0]));
+	ASSERT(Collide(*new_warehouse, *game_map[1]));
+	ASSERT(!Collide(*new_warehouse, *game_map[2]));
+	ASSERT(Collide(*new_warehouse, *game_map[3]));
+	ASSERT(Collide(*new_warehouse, *game_map[4]));
+	ASSERT(!Collide(*new_warehouse, *game_map[5]));
+	ASSERT(!Collide(*new_warehouse, *game_map[6]));
+
+	auto new_defense_tower = make_shared<Tower>(Circle{ {8, 2}, 2 });
+	ASSERT(!Collide(*new_defense_tower, *game_map[0]));
+	ASSERT(!Collide(*new_defense_tower, *game_map[1]));
+	ASSERT(!Collide(*new_defense_tower, *game_map[2]));
+	ASSERT(Collide(*new_defense_tower, *game_map[3]));
+	ASSERT(Collide(*new_defense_tower, *game_map[4]));
+	ASSERT(!Collide(*new_defense_tower, *game_map[5]));
+	ASSERT(!Collide(*new_defense_tower, *game_map[6]));
 }
 
 int main() {
-	TestAll();
-
-	auto stats_aggregator = ReadAggregators(cin);
-
-	for (int value; cin >> value; ) {
-		stats_aggregator->Process(value);
-	}
-	stats_aggregator->PrintValue(cout);
-
-	return 0;
-}
-
-void TestAll() {
 	TestRunner tr;
-	RUN_TEST(tr, StatsAggregators::TestSum);
-	RUN_TEST(tr, StatsAggregators::TestMin);
-	RUN_TEST(tr, StatsAggregators::TestMax);
-	RUN_TEST(tr, StatsAggregators::TestAverage);
-	RUN_TEST(tr, StatsAggregators::TestMode);
-	RUN_TEST(tr, StatsAggregators::TestComposite);
+	RUN_TEST(tr, TestAddingNewObjectOnMap);
+
+	//system("pause");
+	return 0;
 }
