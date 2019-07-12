@@ -1,286 +1,362 @@
-#include "geo2d.h"
-#include "game_object.h"
-
 #include "test_runner.h"
 
 #include <vector>
-#include <memory>
+#include <string>
+#include <iostream>
+#include <sstream>
+#include <utility>
+#include <map>
+#include <optional>
+#include <unordered_set>
 
 using namespace std;
 
-template <typename T>
-struct Collider : GameObject {
-	bool Collide(const GameObject& that) const override {
-		return that.CollideWith(static_cast<const T&>(*this));
-	}
+
+enum class HttpCode {
+	Ok = 200,
+	NotFound = 404,
+	Found = 302,
 };
 
-class Unit : public Collider<Unit> {
+inline string HttpCode2Str(HttpCode code) {
+	switch (code) {
+	case HttpCode::Ok: return "200 OK";
+	case HttpCode::NotFound: return "404 Not found";
+	case HttpCode::Found: return "302 Found";
+	}
+}
+
+class HttpResponse {
 public:
-	Unit(geo2d::Point position) : position_(position) {
+	explicit HttpResponse(HttpCode code_) : code(code_) {}
+
+	HttpResponse& AddHeader(string name, string value) {
+		headers.insert({ name, value });
+		return *this;
+	}
+	HttpResponse& SetContent(string a_content) {
+		content = a_content;
+		//AddHeader("Content-Length", to_string(content.size()));
+		return *this;
+	}
+	HttpResponse& SetCode(HttpCode a_code) {
+		code = a_code;
+		return *this;
 	}
 
-	geo2d::Point GetPosition() const { return position_; }
+	HttpCode getCode() const { return code; }
+	const multimap<string, string>& getHeaders() const { return headers; }
+	const string& getContent() const { return content; }
 
-	bool CollideWith(const Unit& that) const override;
-	bool CollideWith(const Building& that) const override;
-	bool CollideWith(const Tower& that) const override;
-	bool CollideWith(const Fence& that) const override;
+	friend ostream& operator << (ostream& output, const HttpResponse& resp) {
+		output << "HTTP/1.1 " << HttpCode2Str(resp.getCode()) << endl;
+		for (const auto& p : resp.getHeaders()) {
+			output << p.first << ": " << p.second << endl;
+		}
+		if (!resp.getContent().empty()) {
+			output << "Content-Length: " << resp.getContent().size() << endl;
+		}
+		output << endl;
+		output << resp.getContent();
+		return output;
+	}
 
 private:
-	geo2d::Point position_;
+	HttpCode code;
+	multimap<string, string> headers;
+	string content;
 };
 
-class Building : public Collider<Building> {
+
+
+struct HttpRequest {
+	string method, path, body;
+	map<string, string> get_params;
+};
+
+pair<string, string> SplitBy(const string& what, const string& by) {
+	size_t pos = what.find(by);
+	if (by.size() < what.size() && pos < what.size() - by.size()) {
+		return { what.substr(0, pos), what.substr(pos + by.size()) };
+	}
+	else {
+		return { what, {} };
+	}
+}
+
+template<typename T>
+T FromString(const string& s) {
+	T x;
+	istringstream is(s);
+	is >> x;
+	return x;
+}
+
+pair<size_t, string> ParseIdAndContent(const string& body) {
+	auto[id_string, content] = SplitBy(body, " ");
+	return { FromString<size_t>(id_string), content };
+}
+
+struct LastCommentInfo {
+	size_t user_id, consecutive_count;
+};
+
+class CommentServer {
+private:
+	vector<vector<string>> comments_;
+	std::optional<LastCommentInfo> last_comment;
+	unordered_set<size_t> banned_users;
+
 public:
-	Building(geo2d::Rectangle geometry)
-		: geometry_(geometry)
+	HttpResponse ServeRequest(const HttpRequest& req) {
+		HttpResponse httpResponse(HttpCode::NotFound);
+		if (req.method == "POST") {
+			if (req.path == "/add_user") {
+				comments_.emplace_back();
+				auto response = to_string(comments_.size() - 1);
+				httpResponse.SetCode(HttpCode::Ok).SetContent(response);
+				//os << "HTTP/1.1 200 OK\n" << "Content-Length: " << response.size() << "\n" << "\n"
+				//	<< response;
+			}
+			else if (req.path == "/add_comment") {
+				auto[user_id, comment] = ParseIdAndContent(req.body);
+
+				if (!last_comment || last_comment->user_id != user_id) {
+					last_comment = LastCommentInfo{ user_id, 1 };
+				}
+				else if (++last_comment->consecutive_count > 3) {
+					banned_users.insert(user_id);
+				}
+
+				if (banned_users.count(user_id) == 0) {
+					comments_[user_id].push_back(string(comment));
+					httpResponse.SetCode(HttpCode::Ok);
+					//os << "HTTP/1.1 200 OK\n\n";
+				}
+				else {
+					httpResponse.SetCode(HttpCode::Found);
+					httpResponse.AddHeader("Location", "/captcha");
+/*
+					os << "HTTP/1.1 302 Found\n\n"
+						"Location: /captcha\n"
+						"\n";*/
+				}
+			}
+			else if (req.path == "/checkcaptcha") {
+				if (auto[id, response] = ParseIdAndContent(req.body); response == "42") {
+					banned_users.erase(id);
+					if (last_comment && last_comment->user_id == id) {
+						last_comment.reset();
+					}
+					httpResponse.SetCode(HttpCode::Ok);
+					//os << "HTTP/1.1 200 OK\n\n";
+				}
+				else {
+					httpResponse.SetCode(HttpCode::Found);
+					httpResponse.AddHeader("Location", "/captcha");
+				}
+			}
+			else {
+				httpResponse.SetCode(HttpCode::NotFound);
+
+				//os << "HTTP/1.1 404 Not found\n\n";
+			}
+		}
+		else if (req.method == "GET") {
+			if (req.path == "/user_comments") {
+				auto user_id = FromString<size_t>(req.get_params.at("user_id"));
+				string response;
+				for (const string& c : comments_[user_id]) {
+					response += c + '\n';
+				}
+				httpResponse.SetCode(HttpCode::Ok);
+				httpResponse.SetContent(response);
+				//os << "HTTP/1.1 200 OK\n" << "Content-Length: " << response.size() << response;
+			}
+			else if (req.path == "/captcha") {
+				httpResponse.SetCode(HttpCode::Ok);
+				httpResponse.SetContent("What's the answer for The Ultimate Question of Life, the Universe, and Everything?");
+				//os << "HTTP/1.1 200 OK\n" << "Content-Length: 80\n" << "\n"
+				//	<< "What's the answer for The Ultimate Question of Life, the Universe, and Everything?";
+			}
+			else {
+				httpResponse.SetCode(HttpCode::NotFound);
+				//os << "HTTP/1.1 404 Not found\n\n";
+			}
+		}
+
+		return httpResponse;
+	}
+
+	/*void ServeRequest(const HttpRequest& req, ostream& os) {
+		if (req.method == "POST") {
+			if (req.path == "/add_user") {
+				comments_.emplace_back();
+				auto response = to_string(comments_.size() - 1);
+				os << "HTTP/1.1 200 OK\n" << "Content-Length: " << response.size() << "\n" << "\n"
+					<< response;
+			}
+			else if (req.path == "/add_comment") {
+				auto[user_id, comment] = ParseIdAndContent(req.body);
+
+				if (!last_comment || last_comment->user_id != user_id) {
+					last_comment = LastCommentInfo{ user_id, 1 };
+				}
+				else if (++last_comment->consecutive_count > 3) {
+					banned_users.insert(user_id);
+				}
+
+				if (banned_users.count(user_id) == 0) {
+					comments_[user_id].push_back(string(comment));
+					os << "HTTP/1.1 200 OK\n\n";
+				}
+				else {
+					os << "HTTP/1.1 302 Found\n\n"
+						"Location: /captcha\n"
+						"\n";
+				}
+			}
+			else if (req.path == "/checkcaptcha") {
+				if (auto[id, response] = ParseIdAndContent(req.body); response == "42") {
+					banned_users.erase(id);
+					if (last_comment && last_comment->user_id == id) {
+						last_comment.reset();
+					}
+					os << "HTTP/1.1 200 OK\n\n";
+				}
+			}
+			else {
+				os << "HTTP/1.1 404 Not found\n\n";
+			}
+		}
+		else if (req.method == "GET") {
+			if (req.path == "/user_comments") {
+				auto user_id = FromString<size_t>(req.get_params.at("user_id"));
+				string response;
+				for (const string& c : comments_[user_id]) {
+					response += c + '\n';
+				}
+
+				os << "HTTP/1.1 200 OK\n" << "Content-Length: " << response.size() << response;
+			}
+			else if (req.path == "/captcha") {
+				os << "HTTP/1.1 200 OK\n" << "Content-Length: 80\n" << "\n"
+					<< "What's the answer for The Ultimate Question of Life, the Universe, and Everything?";
+			}
+			else {
+				os << "HTTP/1.1 404 Not found\n\n";
+			}
+		}
+	}*/
+};
+
+struct HttpHeader {
+	string name, value;
+};
+
+ostream& operator<<(ostream& output, const HttpHeader& h) {
+	return output << h.name << ": " << h.value;
+}
+
+bool operator==(const HttpHeader& lhs, const HttpHeader& rhs) {
+	return lhs.name == rhs.name && lhs.value == rhs.value;
+}
+
+struct ParsedResponse {
+	int code;
+	vector<HttpHeader> headers;
+	string content;
+};
+
+istream& operator >>(istream& input, ParsedResponse& r) {
+	string line;
+	getline(input, line);
+
 	{
+		istringstream code_input(line);
+		string dummy;
+		code_input >> dummy >> r.code;
 	}
 
-	const geo2d::Rectangle& GetGeometry() const { return geometry_; }
+	size_t content_length = 0;
 
-	bool CollideWith(const Unit& that) const override;
-	bool CollideWith(const Building& that) const override;
-	bool CollideWith(const Tower& that) const override;
-	bool CollideWith(const Fence& that) const override;
-
-private:
-	geo2d::Rectangle geometry_;
-};
-
-class Tower : public Collider<Tower> {
-public:
-	Tower(geo2d::Circle geometry)
-		: geometry_(geometry)
-	{
-	}
-
-	const geo2d::Circle& GetGeometry() const { return geometry_; }
-
-	bool CollideWith(const Unit& that) const override;
-	bool CollideWith(const Building& that) const override;
-	bool CollideWith(const Tower& that) const override;
-	bool CollideWith(const Fence& that) const override;
-
-private:
-	geo2d::Circle geometry_;
-};
-
-class Fence : public Collider<Fence> {
-public:
-	Fence(geo2d::Segment geometry)
-		: geometry_(geometry)
-	{
-	}
-
-	const geo2d::Segment& GetGeometry() const { return geometry_; }
-
-	bool CollideWith(const Unit& that) const override;
-	bool CollideWith(const Building& that) const override;
-	bool CollideWith(const Tower& that) const override;
-	bool CollideWith(const Fence& that) const override;
-
-private:
-	geo2d::Segment geometry_;
-};
-
-// Unit CollideWith implementation
-
-bool Unit::CollideWith(const Unit& that) const {
-	return geo2d::Collide(position_, that.position_);
-}
-
-bool Unit::CollideWith(const Building& that) const {
-	return geo2d::Collide(position_, that.GetGeometry());
-}
-
-bool Unit::CollideWith(const Tower& that) const {
-	return geo2d::Collide(position_, that.GetGeometry());
-}
-
-bool Unit::CollideWith(const Fence& that) const {
-	return geo2d::Collide(position_, that.GetGeometry());
-}
-
-#define DEFINE_METHOD_COLLIDE_WITH(Class, ArgClass)       \
-  bool Class::CollideWith(const ArgClass& that) const {   \
-    return geo2d::Collide(geometry_, that.GetGeometry()); \
-  }
-
-// Building CollideWith implementation
-
-bool Building::CollideWith(const Unit& that) const {
-	return geo2d::Collide(geometry_, that.GetPosition());
-}
-
-DEFINE_METHOD_COLLIDE_WITH(Building, Building)
-DEFINE_METHOD_COLLIDE_WITH(Building, Tower)
-DEFINE_METHOD_COLLIDE_WITH(Building, Fence)
-
-// Tower CollideWith implementation
-
-bool Tower::CollideWith(const Unit& that) const {
-	return geo2d::Collide(geometry_, that.GetPosition());
-}
-
-DEFINE_METHOD_COLLIDE_WITH(Tower, Building)
-DEFINE_METHOD_COLLIDE_WITH(Tower, Tower)
-DEFINE_METHOD_COLLIDE_WITH(Tower, Fence)
-
-// Fence CollideWith implementation
-
-bool Fence::CollideWith(const Unit& that) const {
-	return geo2d::Collide(geometry_, that.GetPosition());
-}
-
-DEFINE_METHOD_COLLIDE_WITH(Fence, Building)
-DEFINE_METHOD_COLLIDE_WITH(Fence, Tower)
-DEFINE_METHOD_COLLIDE_WITH(Fence, Fence)
-
-bool Collide(const GameObject& first, const GameObject& second) {
-	return first.Collide(second);
-}
-
-void TestAddingNewObjectOnMap() {
-	// Юнит-тест моделирует ситуацию, когда на игровой карте уже есть какие-то объекты,
-	// и мы хотим добавить на неё новый, например, построить новое сдание или башню.
-	// Мы можем его добавить, только если он не пересекается ни с одним из существующих.
-	using namespace geo2d;
-
-	const vector<shared_ptr<GameObject>> game_map = {
-	  make_shared<Unit>(Point{3, 3}),
-	  make_shared<Unit>(Point{5, 5}),
-	  make_shared<Unit>(Point{3, 7}),
-	  make_shared<Fence>(Segment{{7, 3}, {9, 8}}),
-	  make_shared<Tower>(Circle{Point{9, 4}, 1}),
-	  make_shared<Tower>(Circle{Point{10, 7}, 1}),
-	  make_shared<Building>(Rectangle{{11, 4}, {14, 6}})
-	};
-
-	for (size_t i = 0; i < game_map.size(); ++i) {
-		Assert(
-			Collide(*game_map[i], *game_map[i]),
-			"An object doesn't collide with itself: " + to_string(i)
-		);
-
-		for (size_t j = 0; j < i; ++j) {
-			Assert(
-				!Collide(*game_map[i], *game_map[j]),
-				"Unexpected collision found " + to_string(i) + ' ' + to_string(j)
-			);
+	r.headers.clear();
+	while (getline(input, line) && !line.empty()) {
+		if (auto[name, value] = SplitBy(line, ": "); name == "Content-Length") {
+			istringstream length_input(value);
+			length_input >> content_length;
+		}
+		else {
+			r.headers.push_back({ std::move(name), std::move(value) });
 		}
 	}
 
-	auto new_warehouse = make_shared<Building>(Rectangle{ {4, 3}, {9, 6} });
-	ASSERT(!Collide(*new_warehouse, *game_map[0]));
-	ASSERT(Collide(*new_warehouse, *game_map[1]));
-	ASSERT(!Collide(*new_warehouse, *game_map[2]));
-	ASSERT(Collide(*new_warehouse, *game_map[3]));
-	ASSERT(Collide(*new_warehouse, *game_map[4]));
-	ASSERT(!Collide(*new_warehouse, *game_map[5]));
-	ASSERT(!Collide(*new_warehouse, *game_map[6]));
-
-	auto new_defense_tower = make_shared<Tower>(Circle{ {8, 2}, 2 });
-	ASSERT(!Collide(*new_defense_tower, *game_map[0]));
-	ASSERT(!Collide(*new_defense_tower, *game_map[1]));
-	ASSERT(!Collide(*new_defense_tower, *game_map[2]));
-	ASSERT(Collide(*new_defense_tower, *game_map[3]));
-	ASSERT(Collide(*new_defense_tower, *game_map[4]));
-	ASSERT(!Collide(*new_defense_tower, *game_map[5]));
-	ASSERT(!Collide(*new_defense_tower, *game_map[6]));
+	r.content.resize(content_length);
+	input.read(r.content.data(), r.content.size());
+	return input;
 }
 
-//////////////////////////////////////////////////////////////////////////
-/// Тесты ниже не являются частью решения. Они нужны для отладки!!!
-//////////////////////////////////////////////////////////////////////////
-
-void TestVectorProduct() {
-	using geo2d::Vector;
-	ASSERT_EQUAL((Vector{ 1, 0 } *Vector{ 2, 0 }), 0);
-	ASSERT_EQUAL((Vector{ 1, 0 } *Vector{ -1, 0 }), 0);
-	ASSERT((Vector{ 1, 0 } *Vector{ 1, 1 } > 0));
-	ASSERT((Vector{ 1, 1 } *Vector{ 1, 0 } < 0));
-	ASSERT((Vector{ 1, 0 } *Vector{ -1, 1 } > 0));
+void Test(CommentServer& srv, const HttpRequest& request, const ParsedResponse& expected) {
+	stringstream ss;
+	HttpResponse httpResp = srv.ServeRequest(request);
+	ss << httpResp;
+	//srv.ServeRequest(request, ss);
+	ParsedResponse resp;
+	ss >> resp;
+	ASSERT_EQUAL(resp.code, expected.code);
+	ASSERT_EQUAL(resp.headers, expected.headers);
+	ASSERT_EQUAL(resp.content, expected.content);
 }
 
-void TestPointSegmentCollide() {
-	using geo2d::Point;
-	using geo2d::Segment;
+template <typename CommentServer>
+void TestServer() {
+	CommentServer cs;
 
-	ASSERT(geo2d::Collide(Point{ 1, 0 }, Segment{ {0, 0}, {10, 0} }));
-	ASSERT(geo2d::Collide(Point{ 0, 0 }, Segment{ {0, 0}, {10, 0} }));
-	ASSERT(geo2d::Collide(Point{ 10, 0 }, Segment{ {0, 0}, {10, 0} }));
-	ASSERT(geo2d::Collide(Point{ 3, 3 }, Segment{ {0, 0}, {10, 10} }));
+	const ParsedResponse ok{ 200 };
+	const ParsedResponse redirect_to_captcha{ 302, {{"Location", "/captcha"}}, {} };
+	const ParsedResponse not_found{ 404 };
 
-	ASSERT(!geo2d::Collide(Point{ -1, 0 }, Segment{ {0, 0}, {10, 0} }));
-	ASSERT(!geo2d::Collide(Point{ 11, 0 }, Segment{ {0, 0}, {10, 0} }));
-	ASSERT(!geo2d::Collide(Point{ 1, 1 }, Segment{ {0, 0}, {10, 0} }));
-	ASSERT(!geo2d::Collide(Point{ 5, 5 }, Segment{ {0, 0}, {10, 0} }));
-	ASSERT(!geo2d::Collide(Point{ -5, 0 }, Segment{ {0, 0}, {10, 0} }));
-	ASSERT(!geo2d::Collide(Point{ 5, -1 }, Segment{ {0, 0}, {10, 0} }));
-}
+	Test(cs, { "POST", "/add_user" }, { 200, {}, "0" });
+	Test(cs, { "POST", "/add_user" }, { 200, {}, "1" });
+	Test(cs, { "POST", "/add_comment", "0 Hello" }, ok);
+	Test(cs, { "POST", "/add_comment", "1 Hi" }, ok);
+	Test(cs, { "POST", "/add_comment", "1 Buy my goods" }, ok);
+	Test(cs, { "POST", "/add_comment", "1 Enlarge" }, ok);
+	Test(cs, { "POST", "/add_comment", "1 Buy my goods" }, redirect_to_captcha);
+	Test(cs, { "POST", "/add_comment", "0 What are you selling?" }, ok);
+	Test(cs, { "POST", "/add_comment", "1 Buy my goods" }, redirect_to_captcha);
+	Test(
+		cs,
+		{ "GET", "/user_comments", "", {{"user_id", "0"}} },
+		{ 200, {}, "Hello\nWhat are you selling?\n" }
+	);
+	Test(
+		cs,
+		{ "GET", "/user_comments", "", {{"user_id", "1"}} },
+		{ 200, {}, "Hi\nBuy my goods\nEnlarge\n" }
+	);
+	Test(
+		cs,
+		{ "GET", "/captcha" },
+		{ 200, {}, {"What's the answer for The Ultimate Question of Life, the Universe, and Everything?"} }
+	);
+	Test(cs, { "POST", "/checkcaptcha", "1 24" }, redirect_to_captcha);
+	Test(cs, { "POST", "/checkcaptcha", "1 42" }, ok);
+	Test(cs, { "POST", "/add_comment", "1 Sorry! No spam any more" }, ok);
+	Test(
+		cs,
+		{ "GET", "/user_comments", "", {{"user_id", "1"}} },
+		{ 200, {}, "Hi\nBuy my goods\nEnlarge\nSorry! No spam any more\n" }
+	);
 
-void TestPointRectangleCollide() {
-	using geo2d::Point;
-	using geo2d::Rectangle;
-
-	const Rectangle r{ {0, 0}, {5, 3} };
-	ASSERT(geo2d::Collide(Point{ 0, 0 }, r));
-	ASSERT(geo2d::Collide(Point{ 5, 0 }, r));
-	ASSERT(geo2d::Collide(Point{ 5, 3 }, r));
-	ASSERT(geo2d::Collide(Point{ 0, 3 }, r));
-	ASSERT(geo2d::Collide(Point{ 2, 2 }, r));
-	ASSERT(geo2d::Collide(Point{ 1, 3 }, r));
-
-	ASSERT(!geo2d::Collide(Point{ -1, 0 }, r));
-	ASSERT(!geo2d::Collide(Point{ 0, -1 }, r));
-	ASSERT(!geo2d::Collide(Point{ 0, 4 }, r));
-	ASSERT(!geo2d::Collide(Point{ 6, 0 }, r));
-	ASSERT(!geo2d::Collide(Point{ 5, 4 }, r));
-	ASSERT(!geo2d::Collide(Point{ 6, 3 }, r));
-	ASSERT(!geo2d::Collide(Point{ 2, 8 }, r));
-}
-
-void TestSegmentSegmentCollide() {
-	using geo2d::Segment;
-	ASSERT(geo2d::Collide(Segment{ {0, 0}, {2, 2} }, Segment{ {2, 0}, {0, 2} }));
-	ASSERT(geo2d::Collide(Segment{ {0, 0}, {2, 2} }, Segment{ {2, 0}, {1, 1} }));
-	ASSERT(geo2d::Collide(Segment{ {0, 0}, {10, 6} }, Segment{ {5, 3}, {15, 9} }));
-	ASSERT(geo2d::Collide(Segment{ {0, 0}, {6, 2} }, Segment{ {4, 2}, {6, 0} }));
-	ASSERT(geo2d::Collide(Segment{ {0, 0}, {6, 2} }, Segment{ {6, 2}, {6, 3} }));
-
-	ASSERT(!geo2d::Collide(Segment{ {0, 0}, {2, 2} }, Segment{ {2, 0}, {1, 0} }));
-	ASSERT(!geo2d::Collide(Segment{ {0, 0}, {10, 6} }, Segment{ {5, 4}, {15, 10} }));
-	ASSERT(!geo2d::Collide(Segment{ {0, 0}, {6, 2} }, Segment{ {4, 1}, {6, 0} }));
-}
-
-void TestSegmentCircleCollide() {
-	using geo2d::Circle;
-	using geo2d::Segment;
-	const Circle c{ {0, 0}, 4 };
-
-	ASSERT(geo2d::Collide(c, Segment{ {0, 0}, {1, 0} }));
-	ASSERT(geo2d::Collide(c, Segment{ {3, 1}, {10, 1} }));
-	ASSERT(geo2d::Collide(c, Segment{ {-5, 2}, {5, 2} }));
-	ASSERT(geo2d::Collide(c, Segment{ {-5, 3}, {5, 3} }));
-	ASSERT(geo2d::Collide(c, Segment{ {-5, 4}, {5, 4} }));
-	ASSERT(geo2d::Collide(c, Segment{ {3, 1}, {4, 5} }));
-	ASSERT(geo2d::Collide(c, Segment{ {5, 0}, {-2, 4} }));
-
-	ASSERT(!geo2d::Collide(c, Segment{ {4, 1}, {4, 5} }));
-	ASSERT(!geo2d::Collide(c, Segment{ {-5, 5}, {5, 5} }));
-	ASSERT(!geo2d::Collide(c, Segment{ {4, 4}, {5, 4} }));
-	ASSERT(!geo2d::Collide(Circle{ {10, 7}, 1 }, Segment{ {7, 3}, {9, 8} }));
+	Test(cs, { "GET", "/user_commntes" }, not_found);
+	Test(cs, { "POST", "/add_uesr" }, not_found);
 }
 
 int main() {
 	TestRunner tr;
-	RUN_TEST(tr, TestAddingNewObjectOnMap);
-	RUN_TEST(tr, TestVectorProduct);
-	RUN_TEST(tr, TestPointSegmentCollide);
-	RUN_TEST(tr, TestPointRectangleCollide);
-	RUN_TEST(tr, TestSegmentSegmentCollide);
-	RUN_TEST(tr, TestSegmentCircleCollide);
+	RUN_TEST(tr, TestServer<CommentServer>);
+
+	//system("pause");
 	return 0;
 }
