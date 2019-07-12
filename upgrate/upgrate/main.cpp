@@ -1,122 +1,113 @@
+#include "xml.h"
+#include "json.h"
+
 #include "test_runner.h"
 
-#include "ini.h"
-
-#include <sstream>
+#include <vector>
+#include <string>
+#include <map>
 
 using namespace std;
 
-void TestLoadIni() {
-	istringstream input(
-		R"(	[july]
-			food=2500
-			sport=12000
-			travel=23400
-			clothes=5200
+Json::Document XmlToJson(const Xml::Document& doc) {
+	vector<Json::Node> result;
 
-			[august]
-			food=3250
-			sport=10000
-			travel=0
-			clothes=8300
-			jewelery=25000
-		)"
-	);
+	for (const auto& n : doc.GetRoot().Children()) {
+		result.emplace_back(map<string, Json::Node>{
+			{"category", Json::Node{ n.AttributeValue<string>("category") }},
+			{ "amount", Json::Node(n.AttributeValue<int>("amount")) }
+		});
+	}
 
-	const Ini::Document doc = Ini::Load(input);
-
-	ASSERT_EQUAL(doc.SectionCount(), 2u);
-
-	const Ini::Section expected_july = {
-	  {"food", "2500"},
-	  {"sport", "12000"},
-	  {"travel", "23400"},
-	  {"clothes", "5200"},
-	};
-
-	const Ini::Section expected_august = {
-	  {"food", "3250"},
-	  {"sport", "10000"},
-	  {"travel", "0"},
-	  {"clothes", "8300"},
-	  {"jewelery", "25000"},
-	};
-
-	ASSERT_EQUAL(doc.GetSection("july"), expected_july);
-	ASSERT_EQUAL(doc.GetSection("august"), expected_august);
+	return Json::Document(Json::Node(std::move(result)));
 }
 
-void TestDocument() {
-	Ini::Document doc;
-	ASSERT_EQUAL(doc.SectionCount(), 0u);
+Xml::Document JsonToXml(const Json::Document& doc, string root_name) {
+	Xml::Node root(move(root_name), {});
+	for (const auto& n : doc.GetRoot().AsArray()) {
+		root.AddChild(Xml::Node("spend", {
+		  {"category", n.AsMap().at("category").AsString()},
+		  {"amount", to_string(n.AsMap().at("amount").AsInt())},
+			}));
+	}
 
-	// Обратите внимание, как мы используем указатель для работы
-	// с последней добавленной секцией. Эта техника может вам пригодиться
-	// для реализации функции Load
-	Ini::Section* section = &doc.AddSection("one");
-	ASSERT_EQUAL(doc.SectionCount(), 1u);
-
-	section->insert({ "name_1", "value_1" });
-	section->insert({ "name_2", "value_2" });
-
-	section = &doc.AddSection("two");
-	section->insert({ "name_1", "value_1" });
-	section->insert({ "name_2", "value_2" });
-	section->insert({ "name_3", "value_3" });
-
-	section = &doc.AddSection("three");
-	section->insert({ "name_1", "value_1" });
-
-	ASSERT_EQUAL(doc.SectionCount(), 3u);
-	const Ini::Section expected_one = { {"name_1", "value_1"}, {"name_2", "value_2"} };
-	const Ini::Section expected_two = {
-	  {"name_1", "value_1"}, {"name_2", "value_2"}, {"name_3", "value_3"}
-	};
-	const Ini::Section expected_three = { {"name_1", "value_1"} };
-
-	ASSERT_EQUAL(doc.GetSection("one"), expected_one);
-	ASSERT_EQUAL(doc.GetSection("two"), expected_two);
-	ASSERT_EQUAL(doc.GetSection("three"), expected_three);
+	return Xml::Document(Xml::Node(std::move(root)));
 }
 
-void TestUnknownSection() {
-	Ini::Document doc;
-	doc.AddSection("primary");
+void TestXmlToJson() {
+	Xml::Node root("july", {});
+	root.AddChild({ "spend", {{"category", "travel"}, {"amount", "23400"}} });
+	root.AddChild({ "spend", {{"category", "food"}, {"amount", "5000"}} });
+	root.AddChild({ "spend", {{"category", "transport"}, {"amount", "1150"}} });
+	root.AddChild({ "spend", {{"category", "sport"}, {"amount", "12000"}} });
+	const Xml::Document xml_doc(std::move(root));
 
-	try {
-		doc.GetSection("secondary");
-		Assert(
-			false,
-			"Ini::Document::GetSection() should throw std::out_of_range for unknown section"
-		);
-	}
-	catch (out_of_range&) {
-	}
-	catch (...) {
-		Assert(
-			false,
-			"Ini::Document::GetSection() throws unexpected exception for unknown section"
-		);
+	const auto json_doc = XmlToJson(xml_doc);
+
+	const auto& items = json_doc.GetRoot().AsArray();
+	ASSERT_EQUAL(items.size(), 4u);
+
+	const vector<string> expected_category = { "travel", "food", "transport", "sport" };
+	const vector<int> expected_amount = { 23400, 5000, 1150, 12000 };
+
+	for (size_t i = 0; i < items.size(); ++i) {
+		const map<string, Json::Node>& item = items[i].AsMap();
+		const string feedback_msg = "i = " + std::to_string(i);
+		AssertEqual(item.at("category").AsString(), expected_category[i], feedback_msg);
+		AssertEqual(item.at("amount").AsInt(), expected_amount[i], feedback_msg);
 	}
 }
 
-void TestDuplicateSections() {
-	Ini::Document doc;
-	doc.AddSection("one").insert({ "key_1", "value_1" });
-	doc.AddSection("one").insert({ "key_2", "value_2" });
+void TestJsonToXml() {
+	using Json::Node;
+	using Json::Document;
 
-	const Ini::Section expected = { {"key_1", "value_1"}, {"key_2", "value_2"} };
-	ASSERT_EQUAL(doc.GetSection("one"), expected);
+	const Document json_doc{ Node(vector<Node>{
+	  Node(map<string, Node>{
+		{"category", Node("food")}, {"amount", Node(2500)}
+	  }),
+	  Node(map<string, Node>{
+		{"category", Node("transport")}, {"amount", Node(1150)}
+	  }),
+	  Node(map<string, Node>{
+		{"category", Node("restaurants")}, {"amount", Node(5780)}
+	  }),
+	  Node(map<string, Node>{
+		{"category", Node("clothes")}, {"amount", Node(7500)}
+	  }),
+	  Node(map<string, Node>{
+		{"category", Node("travel")}, {"amount", Node(23740)}
+	  }),
+	  Node(map<string, Node>{
+		{"category", Node("sport")}, {"amount", Node(12000)}
+	  }),
+	}) };
+
+	const string root_name = "month";
+	const auto xml_doc = JsonToXml(json_doc, root_name);
+	const Xml::Node& root = xml_doc.GetRoot();
+
+	ASSERT_EQUAL(root.Name(), root_name);
+	const vector<Xml::Node>& children = root.Children();
+	ASSERT_EQUAL(children.size(), 6u);
+
+	const vector<string> expected_category = {
+	  "food", "transport", "restaurants", "clothes", "travel", "sport"
+	};
+	const vector<int> expected_amount = { 2500, 1150, 5780, 7500, 23740, 12000 };
+
+	for (size_t i = 0; i < children.size(); ++i) {
+		const string feedback_msg = "i = " + std::to_string(i);
+		const Xml::Node& c = children[i];
+		AssertEqual(c.Name(), "spend", feedback_msg);
+		AssertEqual(c.AttributeValue<string>("category"), expected_category[i], feedback_msg);
+		AssertEqual(c.AttributeValue<int>("amount"), expected_amount[i], feedback_msg);
+	}
 }
 
 int main() {
 	TestRunner tr;
-	RUN_TEST(tr, TestLoadIni);
-	RUN_TEST(tr, TestDocument);
-	RUN_TEST(tr, TestUnknownSection);
-	RUN_TEST(tr, TestDuplicateSections);
-
-	//system("pause");
-
+	RUN_TEST(tr, TestXmlToJson);
+	RUN_TEST(tr, TestJsonToXml);
 	return 0;
 }

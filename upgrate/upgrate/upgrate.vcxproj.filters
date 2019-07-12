@@ -21,6 +21,12 @@
     <ClCompile Include="profile_advanced.cpp">
       <Filter>Исходные файлы</Filter>
     </ClCompile>
+    <ClCompile Include="json.cpp">
+      <Filter>Исходные файлы</Filter>
+    </ClCompile>
+    <ClCompile Include="xml.cpp">
+      <Filter>Исходные файлы</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="profile.h">
@@ -32,7 +38,10 @@
     <ClInclude Include="profile_advanced.h">
       <Filter>Файлы заголовков</Filter>
     </ClInclude>
-    <ClInclude Include="ini.h">
+    <ClInclude Include="json.h">
+      <Filter>Файлы заголовков</Filter>
+    </ClInclude>
+    <ClInclude Include="xml.h">
       <Filter>Файлы заголовков</Filter>
     </ClInclude>
   </ItemGroup>
