@@ -1,176 +1,356 @@
-#include <algorithm>
-#include <iostream>
+#include "test_runner.h"
+#include "profile.h"
+
+#include <future>
+#include <mutex>
+#include <unordered_map>
 #include <vector>
-#include <string>
-#include <optional>
+#include <utility>
+#include <algorithm>
+#include <random>
 #include <numeric>
 
 using namespace std;
 
-template <typename Iterator>
-class IteratorRange {
+//template <typename T>
+//class Synchronized {
+//public:
+//	explicit Synchronized(T initial = T())
+//		: value(move(initial))
+//	{
+//	}
+//
+//	template <typename U>
+//	struct Access {
+//		U& ref_to_value;
+//		lock_guard<mutex> guard;
+//	};
+//
+//	Access<T> GetAccess() {
+//		return { value, lock_guard(m) };
+//	}
+//
+//	Access<const T> GetAccess() const {
+//		return { value, lock_guard(m) };
+//	}
+//
+//private:
+//	T value;
+//	mutable mutex m;
+//};
+
+template <typename T>
+T Abs(T x) {
+	return x < 0 ? (-1 * x) : x;
+}
+
+auto Lock(mutex& m) {
+	return lock_guard<mutex>{m};
+}
+
+template <typename K, typename V, typename Hash = std::hash<K>>
+class ConcurrentMap {
 public:
-	IteratorRange(Iterator begin, Iterator end)
-		: first(begin)
-		, last(end)
-	{
+	using MapType = unordered_map<K, V, Hash>;
+
+	struct MapStruct {
+		mutable mutex mtx;
+		MapType data;
+	};
+
+	struct WriteAccess {
+		lock_guard<mutex> guard;
+		V& ref_to_value;
+
+		WriteAccess(const K& key, MapStruct& bucket_content)
+			: guard(bucket_content.mtx), ref_to_value(bucket_content.data[key])
+		{
+		}
+	};
+
+	struct ReadAccess {
+		lock_guard<mutex> guard;
+		const V& ref_to_value;
+
+		ReadAccess(const K& key, const MapStruct& bucket_content)
+			: guard(bucket_content.mtx), ref_to_value(bucket_content.data.at(key))
+		{
+		}
+	};
+
+
+	explicit ConcurrentMap(size_t bucket_count)
+		: data(bucket_count)
+	{}
+	
+	WriteAccess operator[](const K& key) {
+		auto& bucket = data[hasher(key) % data.size()];
+		return WriteAccess(key, bucket);
+		//return { key, bucket };
+	}
+	
+	ReadAccess At(const K& key) const {
+		const auto& bucket = data[hasher(key) % data.size()];
+		return ReadAccess(key, bucket);
+		//return { key, bucket };
 	}
 
-	Iterator begin() const {
-		return first;
+	bool Has(const K& key) const {
+		for (const auto& m : data) {
+			if (m.data.count(key))
+				return true;
+		}
+		return false;
 	}
 
-	Iterator end() const {
-		return last;
+	MapType BuildOrdinaryMap() const {
+		MapType result;
+		for (const auto& m : data) {
+			auto g = Lock(m.mtx);
+			result.insert(begin(m.data), end(m.data));
+		}
+		return result;
+	}
+
+	MapType BuildOrdinaryMap() {
+		MapType result;
+		for (auto& m : data) {
+			auto g = Lock(m.mtx);
+			result.insert(begin(m.data), end(m.data));
+		}
+		return result;
 	}
 
 private:
-	Iterator first, last;
+	Hash hasher;
+	vector<MapStruct> data;
 };
 
-struct Person {
-	string name;
-	int age, income;
-	bool is_male;
-};
-
-vector<Person> ReadPeople(istream& input) {
-	int count;
-	input >> count;
-
-	vector<Person> result(count);
-	for (Person& p : result) {
-		char gender;
-		input >> p.name >> p.age >> p.income >> gender;
-		p.is_male = gender == 'M';
+#ifdef _MSC_VER
+	template <typename K, typename V>
+	ostream& operator << (ostream& os, const unordered_map<K, V>& m) {
+		os << "umap";
+		return os;
 	}
+#endif
 
-	return result;
-}
+void RunConcurrentUpdates(
+	ConcurrentMap<int, int>& cm, size_t thread_count, int key_count
+) {
+	auto kernel = [&cm, key_count](int seed) {
+		vector<int> updates(key_count);
+		iota(begin(updates), end(updates), -key_count / 2);
+		shuffle(begin(updates), end(updates), default_random_engine(seed));
 
-template <typename Iter>
-std::optional<string> FindMostPopularName(IteratorRange<Iter> range) {
-	if (range.begin() == range.end()) {
-		return std::nullopt;
-	}
-	else {
-		sort(range.begin(), range.end(), [](const Person& lhs, const Person& rhs) {
-			return lhs.name < rhs.name;
-			});
-		const string* most_popular_name = &range.begin()->name;
-		int count = 1;
-		for (auto i = range.begin(); i != range.end(); ) {
-			auto same_name_end = find_if_not(i, range.end(), [i](const Person& p) {
-				return p.name == i->name;
-				});
-			const auto cur_name_count = std::distance(i, same_name_end);
-			if (
-				cur_name_count > count ||
-				(cur_name_count == count && i->name < *most_popular_name)
-				) {
-				count = cur_name_count;
-				most_popular_name = &i->name;
+		for (int i = 0; i < 2; ++i) {
+			for (auto key : updates) {
+				cm[key].ref_to_value++;
 			}
-			i = same_name_end;
 		}
-		return *most_popular_name;
+	};
+
+	vector<future<void>> futures;
+	for (size_t i = 0; i < thread_count; ++i) {
+		futures.push_back(async(kernel, i));
 	}
 }
 
-struct StatsData {
-	std::optional<string> most_popular_male_name;
-	std::optional<string> most_popular_female_name;
-	vector<int> cumulative_wealth;
-	vector<Person> sorted_by_age;
-};
+void TestUpdate() {
+	const size_t thread_count = 3;
+	const int key_count = 50000;
+	ConcurrentMap<int, int> cm(thread_count);
 
-StatsData BuildStatsData(vector<Person> people) {
-	StatsData result;
+	const size_t seed = thread_count;
+	vector<int> updates(key_count);
+	iota(begin(updates), end(updates), -key_count / 2);
+	shuffle(begin(updates), end(updates), default_random_engine(seed));
 
-	{
-		IteratorRange males{
-		  begin(people),
-		  partition(begin(people), end(people), [](const Person& p) {
-			return p.is_male;
-		  })
-		};
-		IteratorRange females{ males.end(), end(people) };
-
-		// По мере обработки запросов список людей не меняется, так что мы можем
-		// один раз найти самые популярные женское и мужское имена
-		result.most_popular_male_name = FindMostPopularName(males);
-		result.most_popular_female_name = FindMostPopularName(females);
-	}
-
-	// Запросы WEALTHY можно тоже обрабатывать за О(1), один раз отсортировав всех
-	// людей по достатку и посчитав массив префиксных сумм
-	{
-		sort(people.begin(), people.end(), [](const Person& lhs, const Person& rhs) {
-			return lhs.income > rhs.income;
-			});
-
-		auto& wealth = result.cumulative_wealth;
-		wealth.resize(people.size());
-		if (!people.empty()) {
-			wealth[0] = people[0].income;
-			for (size_t i = 1; i < people.size(); ++i) {
-				wealth[i] = wealth[i - 1] + people[i].income;
-			}
+	for (int i = 0; i < 2; ++i) {
+		for (auto key : updates) {
+			cm[key].ref_to_value++;
 		}
 	}
 
-	sort(begin(people), end(people), [](const Person& lhs, const Person& rhs) {
-		return lhs.age < rhs.age;
-		});
-	result.sorted_by_age = std::move(people);
+	const auto result = std::as_const(cm).BuildOrdinaryMap();
+	ASSERT_EQUAL(result.size(), key_count);
+}
 
-	return result;
+void TestConcurrentUpdate() {
+	const size_t thread_count = 3;
+	const size_t key_count = 50000;
+
+	ConcurrentMap<int, int> cm(thread_count);
+	RunConcurrentUpdates(cm, thread_count, key_count);
+
+	const auto result = std::as_const(cm).BuildOrdinaryMap();
+	ASSERT_EQUAL(result.size(), key_count);
+	for (auto&[k, v] : result) {
+		AssertEqual(v, 6, "Key = " + to_string(k));
+	}
+}
+
+void TestReadAndWrite() {
+	ConcurrentMap<size_t, string> cm(5);
+
+	auto updater = [&cm] {
+		for (size_t i = 0; i < 50000; ++i) {
+			cm[i].ref_to_value += 'a';
+		}
+	};
+	auto reader = [&cm] {
+		vector<string> result(50000);
+		for (size_t i = 0; i < result.size(); ++i) {
+			result[i] = cm[i].ref_to_value;
+		}
+		return result;
+	};
+
+	auto u1 = async(updater);
+	auto r1 = async(reader);
+	auto u2 = async(updater);
+	auto r2 = async(reader);
+
+	u1.get();
+	u2.get();
+
+	for (auto f : { &r1, &r2 }) {
+		auto result = f->get();
+		ASSERT(all_of(result.begin(), result.end(), [](const string& s) {
+			return s.empty() || s == "a" || s == "aa";
+			}));
+	}
+}
+
+void TestSpeedup() {
+	{
+		ConcurrentMap<int, int> single_lock(1);
+
+		LOG_DURATION("Single lock");
+		RunConcurrentUpdates(single_lock, 4, 50000);
+	}
+	{
+		ConcurrentMap<int, int> many_locks(100);
+
+		LOG_DURATION("100 locks");
+		RunConcurrentUpdates(many_locks, 4, 50000);
+	}
+}
+
+void TestConstAccess() {
+	const unordered_map<int, string> expected = {
+	  {1, "one"},
+	  {2, "two"},
+	  {3, "three"},
+	  {31, "thirty one"},
+	  {127, "one hundred and twenty seven"},
+	  {1598, "fifteen hundred and ninety eight"}
+	};
+
+	const ConcurrentMap<int, string> cm = [&expected] {
+		ConcurrentMap<int, string> result(3);
+		for (const auto&[k, v] : expected) {
+			result[k].ref_to_value = v;
+		}
+		return result;
+	}();
+
+	vector<future<string>> futures;
+	for (int i = 0; i < 10; ++i) {
+		futures.push_back(async([&cm, i] {
+			try {
+				return cm.At(i).ref_to_value;
+			}
+			catch (exception&) {
+				return string();
+			}
+			}));
+	}
+	futures.clear();
+
+	ASSERT_EQUAL(cm.BuildOrdinaryMap(), expected);
+}
+
+void TestStringKeys() {
+	const unordered_map<string, string> expected = {
+	  {"one", "ONE"},
+	  {"two", "TWO"},
+	  {"three", "THREE"},
+	  {"thirty one", "THIRTY ONE"},
+	};
+
+	const ConcurrentMap<string, string> cm = [&expected] {
+		ConcurrentMap<string, string> result(2);
+		for (const auto&[k, v] : expected) {
+			result[k].ref_to_value = v;
+		}
+		return result;
+	}();
+
+	ASSERT_EQUAL(cm.BuildOrdinaryMap(), expected);
+}
+
+struct Point {
+	int x, y;
+};
+
+struct PointHash {
+	size_t operator()(Point p) const {
+		std::hash<int> h;
+		return h(p.x) * 3571 + h(p.y);
+	}
+};
+
+bool operator==(Point lhs, Point rhs) {
+	return lhs.x == rhs.x && lhs.y == rhs.y;
+}
+
+void TestUserType() {
+	ConcurrentMap<Point, size_t, PointHash> point_weight(5);
+
+	vector<future<void>> futures;
+	for (int i = 0; i < 1000; ++i) {
+		futures.push_back(async([&point_weight, i] {
+			point_weight[Point{ i, i }].ref_to_value = i;
+			}));
+	}
+
+	futures.clear();
+
+	for (int i = 0; i < 1000; ++i) {
+		ASSERT_EQUAL(point_weight.At(Point{ i, i }).ref_to_value, i);
+	}
+
+	const auto weights = point_weight.BuildOrdinaryMap();
+	for (int i = 0; i < 1000; ++i) {
+		ASSERT_EQUAL(weights.at(Point{ i, i }), i);
+	}
+}
+
+void TestHas() {
+	ConcurrentMap<int, int> cm(2);
+	cm[1].ref_to_value = 100;
+	cm[2].ref_to_value = 200;
+
+	const auto& const_map = std::as_const(cm);
+	ASSERT(const_map.Has(1));
+	ASSERT(const_map.Has(2));
+	ASSERT(!const_map.Has(3));
 }
 
 int main() {
-	// Основной проблемой исходного решения было то, что в нём случайно изменялись
-	// входные данные. Чтобы ганатировать, что этого не произойдёт, мы организовываем код
-	// так, чтобы в месте обработки запросов были видны только константные данные.
-	//
-	// Для этого всю их предобработку мы вынесли в отдельную функцию, результат которой
-	// сохраняем в константной переменной.
-	const StatsData stats = BuildStatsData(ReadPeople(cin));
+	TestRunner tr;
+	RUN_TEST(tr, TestUpdate);
+	RUN_TEST(tr, TestConcurrentUpdate);
+	RUN_TEST(tr, TestReadAndWrite);
+	RUN_TEST(tr, TestSpeedup);
+	RUN_TEST(tr, TestConstAccess);
+	RUN_TEST(tr, TestStringKeys);
+	RUN_TEST(tr, TestUserType);
+	RUN_TEST(tr, TestHas);
 
-	for (string command; cin >> command; ) {
-		if (command == "AGE") {
-			int adult_age;
-			cin >> adult_age;
+#ifdef _MSC_VER
+	system("pause");
+#endif
 
-			auto adult_begin = lower_bound(
-				begin(stats.sorted_by_age),
-				end(stats.sorted_by_age),
-				adult_age,
-				[](const Person& lhs, int age) {
-					return lhs.age < age;
-				}
-			);
-
-			cout << "There are " << std::distance(adult_begin, end(stats.sorted_by_age))
-				<< " adult people for maturity age " << adult_age << '\n';
-		}
-		else if (command == "WEALTHY") {
-			int count;
-			cin >> count;
-			cout << "Top-" << count << " people have total income "
-				<< stats.cumulative_wealth[count - 1] << '\n';
-		}
-		else if (command == "POPULAR_NAME") {
-			char gender;
-			cin >> gender;
-			const auto& most_popular_name = gender == 'M' ? stats.most_popular_male_name
-				: stats.most_popular_female_name;
-			if (most_popular_name) {
-				cout << "Most popular name among people of gender " << gender << " is "
-					<< *most_popular_name << '\n';
-			}
-			else {
-				cout << "No people of gender " << gender << '\n';
-			}
-		}
-	}
+	return 0;
 }
