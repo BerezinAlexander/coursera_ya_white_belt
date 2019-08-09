@@ -53,77 +53,72 @@ class ConcurrentMap {
 public:
 	using MapType = unordered_map<K, V, Hash>;
 
-	struct MapStruct {
-		mutable mutex mtx;
+private:
+	struct Bucket {
 		MapType data;
+		mutable mutex m;
 	};
 
-	struct WriteAccess {
-		lock_guard<mutex> guard;
+	Hash hasher;
+	vector<Bucket> buckets;
+
+public:
+	// Выполняем наследование от lock_guard<mutex>, чтобы гарантировать, что мьютекс
+	// будет захвачен до модификации bucket'а. Вместо наследования можно было бы
+	// просто объявить поле типа lock_guard<mutex>, но такой подход полагается
+	// на порядок инициализации полей и не гарантирует, что в будущем он случайно не поменяется
+	struct WriteAccess : lock_guard<mutex> {
 		V& ref_to_value;
 
-		WriteAccess(const K& key, MapStruct& bucket_content)
-			: guard(bucket_content.mtx), ref_to_value(bucket_content.data[key])
+		WriteAccess(const K& key, Bucket& bucket)
+			: lock_guard(bucket.m)
+			, ref_to_value(bucket.data[key])
 		{
 		}
 	};
 
-	struct ReadAccess {
-		lock_guard<mutex> guard;
+	struct ReadAccess : lock_guard<mutex> {
 		const V& ref_to_value;
 
-		ReadAccess(const K& key, const MapStruct& bucket_content)
-			: guard(bucket_content.mtx), ref_to_value(bucket_content.data.at(key))
+		ReadAccess(const K& key, const Bucket& bucket)
+			: lock_guard(bucket.m)
+			, ref_to_value(bucket.data.at(key))
 		{
 		}
 	};
 
-
 	explicit ConcurrentMap(size_t bucket_count)
-		: data(bucket_count)
-	{}
-	
-	WriteAccess operator[](const K& key) {
-		auto& bucket = data[hasher(key) % data.size()];
-		return WriteAccess(key, bucket);
-		//return { key, bucket };
+		: buckets(bucket_count)
+	{
 	}
-	
+
+	WriteAccess operator[](const K& key) {
+		return { key, buckets[GetIndex(key)] };
+	}
+
 	ReadAccess At(const K& key) const {
-		const auto& bucket = data[hasher(key) % data.size()];
-		return ReadAccess(key, bucket);
-		//return { key, bucket };
+		return { key, buckets[GetIndex(key)] };
 	}
 
 	bool Has(const K& key) const {
-		for (const auto& m : data) {
-			if (m.data.count(key))
-				return true;
-		}
-		return false;
+		auto& bucket = buckets[GetIndex(key)];
+		lock_guard g(bucket.m);
+		return bucket.data.count(key) > 0;
 	}
 
 	MapType BuildOrdinaryMap() const {
 		MapType result;
-		for (const auto& m : data) {
-			auto g = Lock(m.mtx);
-			result.insert(begin(m.data), end(m.data));
-		}
-		return result;
-	}
-
-	MapType BuildOrdinaryMap() {
-		MapType result;
-		for (auto& m : data) {
-			auto g = Lock(m.mtx);
-			result.insert(begin(m.data), end(m.data));
+		for (auto&[data, mtx] : buckets) {
+			lock_guard g(mtx);
+			result.insert(begin(data), end(data));
 		}
 		return result;
 	}
 
 private:
-	Hash hasher;
-	vector<MapStruct> data;
+	size_t GetIndex(const K& key) const {
+		return hasher(key) % buckets.size();
+	}
 };
 
 #ifdef _MSC_VER
