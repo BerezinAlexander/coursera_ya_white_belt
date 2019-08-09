@@ -37,39 +37,42 @@ class Polynomial {
 private:
 	std::vector<T> coeffs_ = { 0 };
 
-	void Shrink() {
-		while (coeffs_.size() > 1 && coeffs_.back() == 0) {
-			coeffs_.pop_back();
-		}
-	}
-
 	class IndexProxy {
 	public:
 		IndexProxy(Polynomial& poly, size_t degree)
-			: poly_(poly)
-			, degree_(degree)
-		{
-		}
-
-		IndexProxy& operator = (T value) {
-			auto& coeffs = poly_.coeffs_;
-
-			if (degree_ >= coeffs.size()) {
-				coeffs.resize(degree_ + 1);
-			}
-			coeffs[degree_] = value;
-			poly_.Shrink();
-			return *this;
-		}
+			: poly_(poly), degree_(degree)
+		{}
 
 		operator T() const {
+			// Вызываем константную версию Polynomial::operator[]
 			return std::as_const(poly_)[degree_];
+		}
+
+		void operator=(const T& value) {
+			if (degree_ >= poly_.coeffs_.size())
+				poly_.coeffs_.resize(degree_ + 1);
+			poly_.coeffs_[degree_] = value;
+		}
+
+		bool operator ==(const Polynomial& other) const {
+			return poly_ == other.coeffs_;
+		}
+
+		friend std::ostream& operator <<(std::ostream& out, const IndexProxy& p) {
+			out << p.poly_;
+			return out;
 		}
 
 	private:
 		Polynomial& poly_;
 		size_t degree_;
 	};
+
+	void Shrink() const {
+		while (coeffs_.size() > 1 && coeffs_.back() == 0) {
+			coeffs_.pop_back();
+		}
+	}
 
 public:
 	Polynomial() = default;
@@ -120,8 +123,9 @@ public:
 		return degree < coeffs_.size() ? coeffs_[degree] : 0;
 	}
 
+	// Реализуйте неконстантную версию operator[]
 	IndexProxy operator [](size_t degree) {
-		return IndexProxy{ *this, degree };
+		return { *this, degree };
 	}
 
 	T operator ()(const T& x) const {
@@ -186,7 +190,7 @@ void TestCreation() {
 		const vector<int> coeffs = { 4, 9, 7, 8, 12 };
 		Polynomial<int> from_iterators(begin(coeffs), end(coeffs));
 		ASSERT_EQUAL(from_iterators.Degree(), coeffs.size() - 1);
-		ASSERT(equal(cbegin(from_iterators), cend(from_iterators), begin(coeffs)));
+		ASSERT(std::equal(cbegin(from_iterators), cend(from_iterators), begin(coeffs)));
 	}
 }
 
