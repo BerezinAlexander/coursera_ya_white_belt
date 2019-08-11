@@ -1,107 +1,67 @@
+#include "animals.h"
 #include "test_runner.h"
 
-#include <algorithm>
 #include <iostream>
-#include <string>
-#include <queue>
 #include <stdexcept>
-#include <set>
+#include <string>
+#include <sstream>
+#include <vector>
+#include <memory>
+
 using namespace std;
 
-//template <class T>
-//class ObjectPool {
-//public:
-//	T* Allocate();
-//	T* TryAllocate();
-//
-//	void Deallocate(T* object);
-//
-//	~ObjectPool();
-//
-//private:
-//	// Добавьте сюда поля
-//};
+using Zoo = vector<unique_ptr<Animal>>;
 
-template <class T>
-class ObjectPool {
-public:
-	T* Allocate();
-	T* TryAllocate();
-
-	void Deallocate(T* object);
-
-	~ObjectPool();
-
-private:
-	queue<T*> free;
-	set<T*> allocated;
-};
-
-template <typename T>
-T* ObjectPool<T>::Allocate() {
-	if (free.empty()) {
-		free.push(new T);
+// Эта функция получает на вход поток ввода и читает из него описание зверей.
+// Если очередное слово этого текста - Tiger, Wolf или Fox, функция должна поместить соответствующего зверя в зоопарк.
+// В противном случае она должна прекратить чтение и сгенерировать исключение runtime_error.
+Zoo CreateZoo(istream& in) {
+	Zoo zoo;
+	string word;
+	while (in >> word) {
+		if (word == "Tiger") {
+			zoo.push_back(make_unique<Tiger>());
+		}
+		else if (word == "Wolf") {
+			zoo.push_back(make_unique<Wolf>());
+		}
+		else if (word == "Fox") {
+			zoo.push_back(make_unique<Fox>());
+		}
+		else {
+			throw runtime_error("Unknown animal!");
+		}
 	}
-	auto ret = free.front();
-	free.pop();
-	allocated.insert(ret);
-	return ret;
+	return zoo;
 }
 
-template <typename T>
-T* ObjectPool<T>::TryAllocate() {
-	if (free.empty()) {
-		return nullptr;
-	}
-	return Allocate();
-}
-
-template <typename T>
-void ObjectPool<T>::Deallocate(T* object) {
-	if (allocated.find(object) == allocated.end()) {
-		throw invalid_argument("");
-	}
-	allocated.erase(object);
-	free.push(object);
-}
-
-template <typename T>
-ObjectPool<T>::~ObjectPool() {
-	for (auto x : allocated) {
-		delete x;
-	}
-	while (!free.empty()) {
-		auto x = free.front();
-		free.pop();
-		delete x;
+// Эта функция должна перебрать всех зверей в зоопарке в порядке их создания
+// и записать в выходной поток для каждого из них результат работы виртуальной функции voice.
+// Разделяйте голоса разных зверей символом перевода строки '\n'.
+void Process(const Zoo& zoo, ostream& out) {
+	for (const auto& animal : zoo) {
+		out << animal.get()->Voice() << "\n";
 	}
 }
 
-void TestObjectPool() {
-	ObjectPool<string> pool;
+void TestZoo() {
+	istringstream input("Tiger Wolf Fox Tiger");
+	ostringstream output;
+	Process(CreateZoo(input), output);
 
-	auto p1 = pool.Allocate();
-	auto p2 = pool.Allocate();
-	auto p3 = pool.Allocate();
+	const string expected =
+		"Rrrr\n"
+		"Wooo\n"
+		"Tyaf\n"
+		"Rrrr\n";
 
-	*p1 = "first";
-	*p2 = "second";
-	*p3 = "third";
-
-	pool.Deallocate(p2);
-	ASSERT_EQUAL(*pool.Allocate(), "second");
-
-	pool.Deallocate(p3);
-	pool.Deallocate(p1);
-	ASSERT_EQUAL(*pool.Allocate(), "third");
-	ASSERT_EQUAL(*pool.Allocate(), "first");
-
-	pool.Deallocate(p1);
+	ASSERT_EQUAL(output.str(), expected);
 }
 
 int main() {
 	TestRunner tr;
-	RUN_TEST(tr, TestObjectPool);
+	RUN_TEST(tr, TestZoo);
+
 
 #ifdef _MSC_VER
 	system("pause");
