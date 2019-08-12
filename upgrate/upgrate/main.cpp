@@ -1,222 +1,90 @@
 #include "test_runner.h"
-#include <functional>
+#include "Common.h"
+
 #include <memory>
+
 #include <sstream>
-#include <stdexcept>
-#include <string>
-#include <vector>
 
 using namespace std;
 
-
-struct Email {
-	string from;
-	string to;
-	string body;
+enum class NodeType {
+	Value,
+	Sum,
+	Product
 };
 
-
-class Worker {
+class Node : public Expression {
 public:
-	virtual ~Worker() = default;
-	virtual void Process(unique_ptr<Email> email) = 0;
-	virtual void Run() {
-		// только первому worker-у в пайплайне нужно это имплементировать
-		throw logic_error("Unimplemented");
-	}
-
-protected:
-	// реализации должны вызывать PassOn, чтобы передать объект дальше
-	// по цепочке обработчиков
-	void PassOn(unique_ptr<Email> email) const {
-		if (next_) {
-			next_->Process(move(email));
-		}
-	}
-
-public:
-	void SetNext(unique_ptr<Worker> next) {
-		next_ = move(next);
-	}
-
-private:
-	unique_ptr<Worker> next_;
-};
-
-
-class Reader : public Worker {
-public:
-	explicit Reader(istream& in)
-		: in_(in)
+	Node(int value_)
+		: value(value_), type(NodeType::Value)
 	{}
 
-	void Process(unique_ptr<Email> /* email */) override {
-		// не делаем ничего
-	}
-
-	void Run() override {
-		for (;;) {
-			auto email = make_unique<Email>();
-			getline(in_, email->from);
-			getline(in_, email->to);
-			getline(in_, email->body);
-			if (in_) {
-				PassOn(move(email));
-			}
-			else {
-				// в реальных программах здесь стоит раздельно проверять badbit и eof
-				break;
-			}
-		}
-	}
-
-private:
-	istream& in_;
-};
-
-
-class Filter : public Worker {
-public:
-	using Function = function<bool(const Email&)>;
-
-public:
-	explicit Filter(Function func)
-		: func_(move(func))
+	Node(ExpressionPtr lhs, ExpressionPtr rhs, NodeType type_)
+		: left(move(lhs)), right(move(rhs)), type(type_)
 	{}
 
-	void Process(unique_ptr<Email> email) override {
-		if (func_(*email)) {
-			PassOn(move(email));
+	// Вычисляет значение выражения
+	int Evaluate() const {
+		switch (type) {
+		case NodeType::Value:	return value;
+		case NodeType::Sum:		return left->Evaluate() + right->Evaluate();
+		case NodeType::Product: return left->Evaluate() * right->Evaluate();
+		default:				return 0;
+		}
+	}
+
+	// Форматирует выражение как строку
+	// Каждый узел берётся в скобки, независимо от приоритета
+	string ToString() const {
+		switch (type){
+		case NodeType::Value:	return to_string(value);
+		case NodeType::Sum:		return "(" + left->ToString() + ")" + "+" + "(" + right->ToString() + ")";
+		case NodeType::Product: return "(" + left->ToString() + ")" + "*" + "(" + right->ToString() + ")";
+		default:				return "";
 		}
 	}
 
 private:
-	Function func_;
+	ExpressionPtr left;
+	ExpressionPtr right;
+	NodeType type;
+	int value;
 };
 
+ExpressionPtr Value(int value) {
+	return make_unique<Node>(value);
+}
 
-class Copier : public Worker {
-public:
-	explicit Copier(string to)
-		: to_(move(to))
-	{}
+ExpressionPtr Sum(ExpressionPtr left, ExpressionPtr right) {
+	return make_unique<Node>(move(left), move(right), NodeType::Sum);
+}
 
-	void Process(unique_ptr<Email> email) override {
-		if (email->to != to_) {
-			auto copy = make_unique<Email>(*email);
-			copy->to = to_;
-			PassOn(move(email));
-			PassOn(move(copy));
-		}
-		else {
-			PassOn(move(email));
-		}
+ExpressionPtr Product(ExpressionPtr left, ExpressionPtr right) {
+	return make_unique<Node>(move(left), move(right), NodeType::Product);
+}
+
+string Print(const Expression* e) {
+	if (!e) {
+		return "Null expression provided";
 	}
+	stringstream output;
+	output << e->ToString() << " = " << e->Evaluate();
+	return output.str();
+}
 
-private:
-	string to_;
-};
+void Test() {
+	ExpressionPtr e1 = Product(Value(2), Sum(Value(3), Value(4)));
+	ASSERT_EQUAL(Print(e1.get()), "(2)*((3)+(4)) = 14");
 
+	ExpressionPtr e2 = Sum(move(e1), Value(5));
+	ASSERT_EQUAL(Print(e2.get()), "((2)*((3)+(4)))+(5) = 19");
 
-class Sender : public Worker {
-public:
-	explicit Sender(ostream& out)
-		: out_(out)
-	{}
-
-	void Process(unique_ptr<Email> email) override {
-		out_
-			<< email->from << endl
-			<< email->to << endl
-			<< email->body << endl;
-		PassOn(move(email));  // never forget
-	}
-private:
-	ostream& out_;
-};
-
-
-class PipelineBuilder {
-public:
-	explicit PipelineBuilder(istream& in) {
-		workers_.push_back(make_unique<Reader>(in));
-	}
-
-	PipelineBuilder& FilterBy(Filter::Function filter) {
-		workers_.push_back(make_unique<Filter>(move(filter)));
-		return *this;
-	}
-
-	PipelineBuilder& CopyTo(string recipient) {
-		workers_.push_back(make_unique<Copier>(move(recipient)));
-		return *this;
-	}
-
-	PipelineBuilder& Send(ostream& out) {
-		workers_.push_back(make_unique<Sender>(out));
-		return *this;
-	}
-
-	unique_ptr<Worker> Build() {
-		for (size_t i = workers_.size() - 1; i > 0; --i) {
-			workers_[i - 1]->SetNext(move(workers_[i]));
-		}
-		return move(workers_[0]);
-	}
-
-private:
-	vector<unique_ptr<Worker>> workers_;
-};
-
-
-void TestSanity() {
-	string input = (
-		"erich@example.com\n"
-		"richard@example.com\n"
-		"Hello there\n"
-
-		"erich@example.com\n"
-		"ralph@example.com\n"
-		"Are you sure you pressed the right button?\n"
-
-		"ralph@example.com\n"
-		"erich@example.com\n"
-		"I do not make mistakes of that kind\n"
-		);
-	istringstream inStream(input);
-	ostringstream outStream;
-
-	PipelineBuilder builder(inStream);
-	builder.FilterBy([](const Email& email) {
-		return email.from == "erich@example.com";
-		});
-	builder.CopyTo("richard@example.com");
-	builder.Send(outStream);
-	auto pipeline = builder.Build();
-
-	pipeline->Run();
-
-	string expectedOutput = (
-		"erich@example.com\n"
-		"richard@example.com\n"
-		"Hello there\n"
-
-		"erich@example.com\n"
-		"ralph@example.com\n"
-		"Are you sure you pressed the right button?\n"
-
-		"erich@example.com\n"
-		"richard@example.com\n"
-		"Are you sure you pressed the right button?\n"
-		);
-
-	ASSERT_EQUAL(expectedOutput, outStream.str());
+	ASSERT_EQUAL(Print(e1.get()), "Null expression provided");
 }
 
 int main() {
 	TestRunner tr;
-	RUN_TEST(tr, TestSanity);
-
+	RUN_TEST(tr, Test);
 
 #ifdef _MSC_VER
 	system("pause");
