@@ -47,7 +47,7 @@ class Reader : public Worker {
 public:
 	/*конструктор должен принимать входной поток (istream&), из которого нужно читать сообщения*/
 	Reader(istream& input_)
-		: input(input_.rdbuf())
+		: input(input_)
 	{}
 
 	/*метод Run должен читать из входного потока все e-mail'ы и передавать дальше каждый из них. 
@@ -63,16 +63,15 @@ public:
 			getline(input, ptrEmail->to);
 			if (!input) break;
 			getline(input, ptrEmail->body);
-			Process(move(ptrEmail));
+			PassOn(move(ptrEmail));
 		}
 	}
 
 	void Process(unique_ptr<Email> email) {
-		PassOn(move(email));
 	}
 
 private:
-	istream input;
+	istream& input;
 };
 
 
@@ -121,7 +120,7 @@ private:
 class Sender : public Worker {
 public:
 	Sender(ostream& output_)
-		: output(output_.rdbuf())
+		: output(output_)
 	{}
 
 	void Process(unique_ptr<Email> email) {
@@ -134,7 +133,7 @@ public:
 	}
 
 private:
-	ostream output;
+	ostream& output;
 };
 
 
@@ -142,9 +141,11 @@ private:
 class PipelineBuilder {
 public:
 	PipelineBuilder() = delete;
+
 	// добавляет в качестве первого обработчика Reader
-	explicit PipelineBuilder(istream& in) {
-		reader = make_unique<Reader>(in);
+	explicit PipelineBuilder(istream& in)
+		: reader(new Reader(in))
+	{
 	}
 
 	// добавляет новый обработчик Filter
@@ -166,10 +167,9 @@ public:
 	}
 
 	// возвращает готовую цепочку обработчиков
-	unique_ptr<Worker> Build() {
-		unique_ptr<Worker> main_worker;
+	unique_ptr<Reader> Build() {
 		if (!workers.empty()) {
-			main_worker = move(workers.back());
+			unique_ptr<Worker> main_worker = move(workers.back());
 			workers.pop_back();
 			while (!workers.empty()) {			
 				unique_ptr<Worker> worker = move(workers.back());
@@ -177,14 +177,14 @@ public:
 				worker->SetNext(move(main_worker));
 				main_worker = move(worker);
 			}
+			reader->SetNext(move(main_worker));
 		}
-		reader->SetNext(move(main_worker));
 		return move(reader);
 	}
 
 private:
 	vector<unique_ptr<Worker>> workers;
-	unique_ptr<Worker> reader;
+	unique_ptr<Reader> reader;
 };
 
 
