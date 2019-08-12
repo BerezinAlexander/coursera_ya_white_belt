@@ -1,137 +1,201 @@
 #include "test_runner.h"
 #include "Common.h"
+#include "Textures.h"
+#include "test_runner.h"
 
-#include <memory>
-
-#include <sstream>
+#include <iostream>
+#include <map>
 
 using namespace std;
 
-enum class NodeType {
-	Value,
-	Sum,
-	Product
-};
-
-// Класс, представляющий конкретное число - лист дерева выражения
-class ValueExpr : public Expression {
+class Canvas {
 public:
-	ValueExpr(int value) : value_(value) {}
+	using ShapeId = size_t;
 
-	int Evaluate() const override {
-		return value_;
+	void SetSize(Size size) {
+		size_ = size;
 	}
-	string ToString() const override {
-		return to_string(value_);
+
+	ShapeId AddShape(ShapeType shape_type, Point position, Size size,
+		unique_ptr<ITexture> texture) {
+		auto shape = MakeShape(shape_type);
+		shape->SetPosition(position);
+		shape->SetSize(size);
+		shape->SetTexture(move(texture));
+		return InsertShape(move(shape));
+	}
+
+	ShapeId DuplicateShape(ShapeId source_id, Point target_position) {
+		auto shape = GetShapeNodeById(source_id)->second->Clone();
+		shape->SetPosition(target_position);
+		return InsertShape(move(shape));
+	}
+
+	void RemoveShape(ShapeId id) {
+		shapes_.erase(GetShapeNodeById(id));
+	}
+
+	void MoveShape(ShapeId id, Point position) {
+		GetShapeNodeById(id)->second->SetPosition(position);
+	}
+
+	void ResizeShape(ShapeId id, Size size) {
+		GetShapeNodeById(id)->second->SetSize(size);
+	}
+
+	int GetShapesCount() const {
+		return static_cast<int>(shapes_.size());
+	}
+
+	void Print(ostream& output) const {
+		Image image(size_.height, string(size_.width, ' '));
+
+		for (const auto&[id, shape] : shapes_) {
+			shape->Draw(image);
+		}
+
+		output << '#' << string(size_.width, '#') << "#\n";
+		for (const auto& line : image) {
+			output << '#' << line << "#\n";
+		}
+		output << '#' << string(size_.width, '#') << "#\n";
 	}
 
 private:
-	int value_;
+	using Shapes = map<ShapeId, unique_ptr<IShape>>;
+
+	Shapes::iterator GetShapeNodeById(ShapeId id) {
+		auto it = shapes_.find(id);
+		if (it == shapes_.end()) {
+			throw out_of_range("No shape with given ID");
+		}
+		return it;
+	}
+	ShapeId InsertShape(unique_ptr<IShape> shape) {
+		shapes_[current_id_] = move(shape);
+		return current_id_++;
+	}
+
+	Size size_ = {};
+	ShapeId current_id_ = 0;
+	Shapes shapes_;
 };
 
-// Базовый класс бинарных операций
-class BinaryExpr : public Expression {
-public:
-	BinaryExpr(ExpressionPtr left, ExpressionPtr right) :
-		left_(move(left)),
-		right_(move(right)) {}
+void TestSimple() {
+	Canvas canvas;
+	canvas.SetSize({ 5, 3 });
 
-	// Здесь виртуальные функции переопределяются с ключевым словом "final".
-	// Это то же самое, что и "override", но только мы запрещаем дальнейшее
-	// их переопределение в наследниках. Действительно, мы хотим показать,
-	// что наследники должны переопределить закрытые функции GetSymbol() и
-	// EvaluateOnValues(), а сами функции ToString() и Evaluate() трогать больше
-	// не нужно.
-	string ToString() const final {
-		ostringstream result;
-		result << '(' << left_->ToString() << ')'
-			<< GetSymbol()
-			<< '(' << right_->ToString() << ')';
-		return result.str();
-	}
-	int Evaluate() const final {
-		return EvaluateOnValues(left_->Evaluate(), right_->Evaluate());
-	}
+	canvas.AddShape(ShapeType::Rectangle, { 1, 0 }, { 3, 3 }, nullptr);
 
-private:
-	// Введение этих новых вирутальных функций позволяет уменьшить дублирование
-	// кода в наследниках, т.к. весь общий код собран в функциях ToString() и
-	// Evaluate() базового (данного) класса. А наследники просто сообщают символ
-	// операции и применяют её к переданным операндам.
-	virtual char GetSymbol() const = 0;
-	virtual int EvaluateOnValues(int l, int r) const = 0;
-
-	ExpressionPtr left_;
-	ExpressionPtr right_;
-};
-
-// Класс для операции умножения
-class ProductExpr : public BinaryExpr {
-public:
-	ProductExpr(ExpressionPtr left, ExpressionPtr right) :
-		BinaryExpr(move(left), move(right)) {}
-
-private:
-	char GetSymbol() const override {
-		return '*';
-	}
-	int EvaluateOnValues(int left, int right) const override {
-		return left * right;
-	}
-};
-
-// Класс для операции сложения
-class SumExpr : public BinaryExpr {
-public:
-	// Данное выражение позволяет унаследовать конструктор из базового класса.
-	// Сравните с реализацией класса ProductExpr, где мы использовали "обычный"
-	// конструктор, который принимает ровно те же параметры, что и конструктор
-	// базового класса, и просто передаёт их ему. Ту же самую работу за нас
-	// может проделать компилятор, если мы скажем ему унаследовать конструктор.
-	using BinaryExpr::BinaryExpr;
-
-private:
-	char GetSymbol() const override {
-		return '+';
-	}
-	int EvaluateOnValues(int left, int right) const override {
-		return left + right;
-	}
-};
-
-// Функции для формирования выражения
-ExpressionPtr Value(int value) {
-	return make_unique<ValueExpr>(value);
-}
-ExpressionPtr Sum(ExpressionPtr left, ExpressionPtr right) {
-	return make_unique<SumExpr>(move(left), move(right));
-}
-ExpressionPtr Product(ExpressionPtr left, ExpressionPtr right) {
-	return make_unique<ProductExpr>(move(left), move(right));
-}
-
-string Print(const Expression* e) {
-	if (!e) {
-		return "Null expression provided";
-	}
 	stringstream output;
-	output << e->ToString() << " = " << e->Evaluate();
-	return output.str();
+	canvas.Print(output);
+
+	const auto answer =
+		"#######\n"
+		"# ... #\n"
+		"# ... #\n"
+		"# ... #\n"
+		"#######\n";
+
+	ASSERT_EQUAL(answer, output.str());
 }
 
-void Test() {
-	ExpressionPtr e1 = Product(Value(2), Sum(Value(3), Value(4)));
-	ASSERT_EQUAL(Print(e1.get()), "(2)*((3)+(4)) = 14");
+void TestSmallTexture() {
+	Canvas canvas;
+	canvas.SetSize({ 6, 4 });
 
-	ExpressionPtr e2 = Sum(move(e1), Value(5));
-	ASSERT_EQUAL(Print(e2.get()), "((2)*((3)+(4)))+(5) = 19");
+	canvas.AddShape(ShapeType::Rectangle, { 1, 1 }, { 4, 2 },
+		MakeTextureSolid({ 3, 1 }, '*'));
 
-	ASSERT_EQUAL(Print(e1.get()), "Null expression provided");
+	stringstream output;
+	canvas.Print(output);
+
+	const auto answer =
+		"########\n"
+		"#      #\n"
+		"# ***. #\n"
+		"# .... #\n"
+		"#      #\n"
+		"########\n";
+
+	ASSERT_EQUAL(answer, output.str());
+}
+
+void TestCow() {
+	Canvas canvas;
+	canvas.SetSize({ 18, 5 });
+
+	canvas.AddShape(ShapeType::Rectangle, { 1, 0 }, { 16, 5 }, MakeTextureCow());
+
+	stringstream output;
+	canvas.Print(output);
+
+	// Здесь уместно использовать сырые литералы, т.к. в текстуре есть символы '\'
+	const auto answer =
+		R"(####################)""\n"
+		R"(# ^__^             #)""\n"
+		R"(# (oo)\_______     #)""\n"
+		R"(# (__)\       )\/\ #)""\n"
+		R"(#     ||----w |    #)""\n"
+		R"(#     ||     ||    #)""\n"
+		R"(####################)""\n";
+
+	ASSERT_EQUAL(answer, output.str());
+}
+
+void TestCpp() {
+	Canvas canvas;
+	canvas.SetSize({ 77, 17 });
+
+	// Буква "C" как разность двух эллипсов, один из которых нарисован цветом фона
+	canvas.AddShape(ShapeType::Ellipse, { 2, 1 }, { 30, 15 },
+		MakeTextureCheckers({ 100, 100 }, 'c', 'C'));
+	canvas.AddShape(ShapeType::Ellipse, { 8, 4 }, { 30, 9 },
+		MakeTextureSolid({ 100, 100 }, ' '));
+
+	// Горизонтальные чёрточки плюсов
+	auto h1 = canvas.AddShape(ShapeType::Rectangle, { 54, 7 }, { 22, 3 },
+		MakeTextureSolid({ 100, 100 }, '+'));
+	auto h2 = canvas.DuplicateShape(h1, { 30, 7 });
+
+	// Вертикальные чёрточки плюсов
+	auto v1 = canvas.DuplicateShape(h1, { 62, 3 });
+	canvas.ResizeShape(v1, { 6, 11 });
+	auto v2 = canvas.DuplicateShape(v1, { 38, 3 });
+
+	stringstream output;
+	canvas.Print(output);
+
+	const auto answer =
+		"###############################################################################\n"
+		"#                                                                             #\n"
+		"#            cCcCcCcCcC                                                       #\n"
+		"#        CcCcCcCcCcCcCcCcCc                                                   #\n"
+		"#      cCcCcCcCcCcCcCcCcCcCcC          ++++++                  ++++++         #\n"
+		"#    CcCcCcCcCcCc                      ++++++                  ++++++         #\n"
+		"#   CcCcCcCcC                          ++++++                  ++++++         #\n"
+		"#   cCcCcCc                            ++++++                  ++++++         #\n"
+		"#  cCcCcC                      ++++++++++++++++++++++  ++++++++++++++++++++++ #\n"
+		"#  CcCcCc                      ++++++++++++++++++++++  ++++++++++++++++++++++ #\n"
+		"#  cCcCcC                      ++++++++++++++++++++++  ++++++++++++++++++++++ #\n"
+		"#   cCcCcCc                            ++++++                  ++++++         #\n"
+		"#   CcCcCcCcC                          ++++++                  ++++++         #\n"
+		"#    CcCcCcCcCcCc                      ++++++                  ++++++         #\n"
+		"#      cCcCcCcCcCcCcCcCcCcCcC          ++++++                  ++++++         #\n"
+		"#        CcCcCcCcCcCcCcCcCc                                                   #\n"
+		"#            cCcCcCcCcC                                                       #\n"
+		"#                                                                             #\n"
+		"###############################################################################\n";
+
+	ASSERT_EQUAL(answer, output.str());
 }
 
 int main() {
 	TestRunner tr;
-	RUN_TEST(tr, Test);
+	RUN_TEST(tr, TestSimple);
+	RUN_TEST(tr, TestSmallTexture);
+	RUN_TEST(tr, TestCow);
+	RUN_TEST(tr, TestCpp);
 
 #ifdef _MSC_VER
 	system("pause");
