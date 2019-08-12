@@ -13,54 +13,101 @@ enum class NodeType {
 	Product
 };
 
-class Node : public Expression {
+// Класс, представляющий конкретное число - лист дерева выражения
+class ValueExpr : public Expression {
 public:
-	Node(int value_)
-		: value(value_), type(NodeType::Value)
-	{}
+	ValueExpr(int value) : value_(value) {}
 
-	Node(ExpressionPtr lhs, ExpressionPtr rhs, NodeType type_)
-		: left(move(lhs)), right(move(rhs)), type(type_)
-	{}
-
-	// Вычисляет значение выражения
-	int Evaluate() const {
-		switch (type) {
-		case NodeType::Value:	return value;
-		case NodeType::Sum:		return left->Evaluate() + right->Evaluate();
-		case NodeType::Product: return left->Evaluate() * right->Evaluate();
-		default:				return 0;
-		}
+	int Evaluate() const override {
+		return value_;
 	}
-
-	// Форматирует выражение как строку
-	// Каждый узел берётся в скобки, независимо от приоритета
-	string ToString() const {
-		switch (type){
-		case NodeType::Value:	return to_string(value);
-		case NodeType::Sum:		return "(" + left->ToString() + ")" + "+" + "(" + right->ToString() + ")";
-		case NodeType::Product: return "(" + left->ToString() + ")" + "*" + "(" + right->ToString() + ")";
-		default:				return "";
-		}
+	string ToString() const override {
+		return to_string(value_);
 	}
 
 private:
-	ExpressionPtr left;
-	ExpressionPtr right;
-	NodeType type;
-	int value;
+	int value_;
 };
 
+// Базовый класс бинарных операций
+class BinaryExpr : public Expression {
+public:
+	BinaryExpr(ExpressionPtr left, ExpressionPtr right) :
+		left_(move(left)),
+		right_(move(right)) {}
+
+	// Здесь виртуальные функции переопределяются с ключевым словом "final".
+	// Это то же самое, что и "override", но только мы запрещаем дальнейшее
+	// их переопределение в наследниках. Действительно, мы хотим показать,
+	// что наследники должны переопределить закрытые функции GetSymbol() и
+	// EvaluateOnValues(), а сами функции ToString() и Evaluate() трогать больше
+	// не нужно.
+	string ToString() const final {
+		ostringstream result;
+		result << '(' << left_->ToString() << ')'
+			<< GetSymbol()
+			<< '(' << right_->ToString() << ')';
+		return result.str();
+	}
+	int Evaluate() const final {
+		return EvaluateOnValues(left_->Evaluate(), right_->Evaluate());
+	}
+
+private:
+	// Введение этих новых вирутальных функций позволяет уменьшить дублирование
+	// кода в наследниках, т.к. весь общий код собран в функциях ToString() и
+	// Evaluate() базового (данного) класса. А наследники просто сообщают символ
+	// операции и применяют её к переданным операндам.
+	virtual char GetSymbol() const = 0;
+	virtual int EvaluateOnValues(int l, int r) const = 0;
+
+	ExpressionPtr left_;
+	ExpressionPtr right_;
+};
+
+// Класс для операции умножения
+class ProductExpr : public BinaryExpr {
+public:
+	ProductExpr(ExpressionPtr left, ExpressionPtr right) :
+		BinaryExpr(move(left), move(right)) {}
+
+private:
+	char GetSymbol() const override {
+		return '*';
+	}
+	int EvaluateOnValues(int left, int right) const override {
+		return left * right;
+	}
+};
+
+// Класс для операции сложения
+class SumExpr : public BinaryExpr {
+public:
+	// Данное выражение позволяет унаследовать конструктор из базового класса.
+	// Сравните с реализацией класса ProductExpr, где мы использовали "обычный"
+	// конструктор, который принимает ровно те же параметры, что и конструктор
+	// базового класса, и просто передаёт их ему. Ту же самую работу за нас
+	// может проделать компилятор, если мы скажем ему унаследовать конструктор.
+	using BinaryExpr::BinaryExpr;
+
+private:
+	char GetSymbol() const override {
+		return '+';
+	}
+	int EvaluateOnValues(int left, int right) const override {
+		return left + right;
+	}
+};
+
+// Функции для формирования выражения
 ExpressionPtr Value(int value) {
-	return make_unique<Node>(value);
+	return make_unique<ValueExpr>(value);
 }
-
 ExpressionPtr Sum(ExpressionPtr left, ExpressionPtr right) {
-	return make_unique<Node>(move(left), move(right), NodeType::Sum);
+	return make_unique<SumExpr>(move(left), move(right));
 }
-
 ExpressionPtr Product(ExpressionPtr left, ExpressionPtr right) {
-	return make_unique<Node>(move(left), move(right), NodeType::Product);
+	return make_unique<ProductExpr>(move(left), move(right));
 }
 
 string Print(const Expression* e) {
