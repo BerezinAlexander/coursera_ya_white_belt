@@ -1,201 +1,217 @@
-#include "test_runner.h"
 #include "Common.h"
-#include "Textures.h"
 #include "test_runner.h"
 
-#include <iostream>
-#include <map>
+#include <atomic>
+#include <future>
+#include <numeric>
+#include <random>
+#include <sstream>
 
 using namespace std;
 
-class Canvas {
+// Данная реализация интерфейса IBook позволяет отследить объём памяти, в данный
+// момент занимаемый всеми загруженными книгами. Для тестирования своей
+// программы вы можете написать другую реализацию, которая позволит также
+// убедиться, что из кэша выгружаются в первую очередь наименее используемые
+// элементы. Собственно, тестирующая система курсеры имеет как раз более
+// продвинутую реализацию.
+class Book : public IBook {
 public:
-	using ShapeId = size_t;
-
-	void SetSize(Size size) {
-		size_ = size;
+	Book(
+		string name,
+		string content,
+		atomic<size_t>& memory_used_by_books
+	)
+		: name_(move(name))
+		, content_(move(content))
+		, memory_used_by_books_(memory_used_by_books)
+	{
+		memory_used_by_books_ += content_.size();
 	}
 
-	ShapeId AddShape(ShapeType shape_type, Point position, Size size,
-		unique_ptr<ITexture> texture) {
-		auto shape = MakeShape(shape_type);
-		shape->SetPosition(position);
-		shape->SetSize(size);
-		shape->SetTexture(move(texture));
-		return InsertShape(move(shape));
+	~Book() {
+		memory_used_by_books_ -= content_.size();
 	}
 
-	ShapeId DuplicateShape(ShapeId source_id, Point target_position) {
-		auto shape = GetShapeNodeById(source_id)->second->Clone();
-		shape->SetPosition(target_position);
-		return InsertShape(move(shape));
+	const string& GetName() const override {
+		return name_;
 	}
 
-	void RemoveShape(ShapeId id) {
-		shapes_.erase(GetShapeNodeById(id));
-	}
-
-	void MoveShape(ShapeId id, Point position) {
-		GetShapeNodeById(id)->second->SetPosition(position);
-	}
-
-	void ResizeShape(ShapeId id, Size size) {
-		GetShapeNodeById(id)->second->SetSize(size);
-	}
-
-	int GetShapesCount() const {
-		return static_cast<int>(shapes_.size());
-	}
-
-	void Print(ostream& output) const {
-		Image image(size_.height, string(size_.width, ' '));
-
-		for (const auto&[id, shape] : shapes_) {
-			shape->Draw(image);
-		}
-
-		output << '#' << string(size_.width, '#') << "#\n";
-		for (const auto& line : image) {
-			output << '#' << line << "#\n";
-		}
-		output << '#' << string(size_.width, '#') << "#\n";
+	const string& GetContent() const override {
+		return content_;
 	}
 
 private:
-	using Shapes = map<ShapeId, unique_ptr<IShape>>;
-
-	Shapes::iterator GetShapeNodeById(ShapeId id) {
-		auto it = shapes_.find(id);
-		if (it == shapes_.end()) {
-			throw out_of_range("No shape with given ID");
-		}
-		return it;
-	}
-	ShapeId InsertShape(unique_ptr<IShape> shape) {
-		shapes_[current_id_] = move(shape);
-		return current_id_++;
-	}
-
-	Size size_ = {};
-	ShapeId current_id_ = 0;
-	Shapes shapes_;
+	string name_;
+	string content_;
+	atomic<size_t>& memory_used_by_books_;
 };
 
-void TestSimple() {
-	Canvas canvas;
-	canvas.SetSize({ 5, 3 });
+// Данная реализация интерфейса IBooksUnpacker позволяет отследить объём памяти,
+// в данный момент занимаемый всеми загруженными книгами и запросить количество
+// обращений к методу UnpackBook(). Для тестирования своей программы вы можете
+// написать другую реализацию. Собственно, тестирующая система курсеры имеет как
+// раз более продвинутую реализацию.
+class BooksUnpacker : public IBooksUnpacker {
+public:
+	unique_ptr<IBook> UnpackBook(const string& book_name) override {
+		++unpacked_books_count_;
+		return make_unique<Book>(
+			book_name,
+			"Dummy content of the book " + book_name,
+			memory_used_by_books_
+			);
+	}
 
-	canvas.AddShape(ShapeType::Rectangle, { 1, 0 }, { 3, 3 }, nullptr);
+	size_t GetMemoryUsedByBooks() const {
+		return memory_used_by_books_;
+	}
 
-	stringstream output;
-	canvas.Print(output);
+	int GetUnpackedBooksCount() const {
+		return unpacked_books_count_;
+	}
 
-	const auto answer =
-		"#######\n"
-		"# ... #\n"
-		"# ... #\n"
-		"# ... #\n"
-		"#######\n";
+private:
+	// Шаблонный класс atomic позволяет безопасно использовать скалярный тип из
+	// нескольких потоков. В противном случае у нас было бы состояние гонки.
+	atomic<size_t> memory_used_by_books_ = 0;
+	atomic<int> unpacked_books_count_ = 0;
+};
 
-	ASSERT_EQUAL(answer, output.str());
+struct Library {
+	vector<string> book_names;
+	unordered_map<string, unique_ptr<IBook>> content;
+	size_t size_in_bytes = 0;
+
+	explicit Library(vector<string> a_book_names, IBooksUnpacker& unpacker)
+		: book_names(std::move(a_book_names))
+	{
+		for (const auto& book_name : book_names) {
+			auto& book_content = content[book_name];
+			book_content = unpacker.UnpackBook(book_name);
+			size_in_bytes += book_content->GetContent().size();
+		}
+	}
+};
+
+
+void TestUnpacker(const Library& lib) {
+	BooksUnpacker unpacker;
+	for (const auto& book_name : lib.book_names) {
+		auto book = unpacker.UnpackBook(book_name);
+		ASSERT_EQUAL(book->GetName(), book_name);
+	}
 }
 
-void TestSmallTexture() {
-	Canvas canvas;
-	canvas.SetSize({ 6, 4 });
 
-	canvas.AddShape(ShapeType::Rectangle, { 1, 1 }, { 4, 2 },
-		MakeTextureSolid({ 3, 1 }, '*'));
+void TestMaxMemory(const Library& lib) {
+	auto unpacker = make_shared<BooksUnpacker>();
+	ICache::Settings settings;
+	settings.max_memory = lib.size_in_bytes / 2;
+	auto cache = MakeCache(unpacker, settings);
 
-	stringstream output;
-	canvas.Print(output);
-
-	const auto answer =
-		"########\n"
-		"#      #\n"
-		"# ***. #\n"
-		"# .... #\n"
-		"#      #\n"
-		"########\n";
-
-	ASSERT_EQUAL(answer, output.str());
+	for (const auto&[name, book] : lib.content) {
+		cache->GetBook(name);
+		ASSERT(unpacker->GetMemoryUsedByBooks() <= settings.max_memory);
+	}
 }
 
-void TestCow() {
-	Canvas canvas;
-	canvas.SetSize({ 18, 5 });
 
-	canvas.AddShape(ShapeType::Rectangle, { 1, 0 }, { 16, 5 }, MakeTextureCow());
+void TestCaching(const Library& lib) {
+	auto unpacker = make_shared<BooksUnpacker>();
+	ICache::Settings settings;
+	settings.max_memory = lib.size_in_bytes;
+	auto cache = MakeCache(unpacker, settings);
 
-	stringstream output;
-	canvas.Print(output);
-
-	// Здесь уместно использовать сырые литералы, т.к. в текстуре есть символы '\'
-	const auto answer =
-		R"(####################)""\n"
-		R"(# ^__^             #)""\n"
-		R"(# (oo)\_______     #)""\n"
-		R"(# (__)\       )\/\ #)""\n"
-		R"(#     ||----w |    #)""\n"
-		R"(#     ||     ||    #)""\n"
-		R"(####################)""\n";
-
-	ASSERT_EQUAL(answer, output.str());
+	// Если запрашивать одну и ту же книгу подряд, то она определённо должна
+	// возвращаться из кэша. Заметьте, что этого простого теста вовсе
+	// недостаточно, чтобы полностью проверить правильность реализации стратегии
+	// замещения элементов в кэше. Для этих целей можете написать тест
+	// самостоятельно.
+	cache->GetBook(lib.book_names[0]);
+	cache->GetBook(lib.book_names[0]);
+	cache->GetBook(lib.book_names[0]);
+	ASSERT_EQUAL(unpacker->GetUnpackedBooksCount(), 1);
 }
 
-void TestCpp() {
-	Canvas canvas;
-	canvas.SetSize({ 77, 17 });
 
-	// Буква "C" как разность двух эллипсов, один из которых нарисован цветом фона
-	canvas.AddShape(ShapeType::Ellipse, { 2, 1 }, { 30, 15 },
-		MakeTextureCheckers({ 100, 100 }, 'c', 'C'));
-	canvas.AddShape(ShapeType::Ellipse, { 8, 4 }, { 30, 9 },
-		MakeTextureSolid({ 100, 100 }, ' '));
+void TestSmallCache(const Library& lib) {
+	auto unpacker = make_shared<BooksUnpacker>();
+	ICache::Settings settings;
+	settings.max_memory =
+		unpacker->UnpackBook(lib.book_names[0])->GetContent().size() - 1;
+	auto cache = MakeCache(unpacker, settings);
 
-	// Горизонтальные чёрточки плюсов
-	auto h1 = canvas.AddShape(ShapeType::Rectangle, { 54, 7 }, { 22, 3 },
-		MakeTextureSolid({ 100, 100 }, '+'));
-	auto h2 = canvas.DuplicateShape(h1, { 30, 7 });
-
-	// Вертикальные чёрточки плюсов
-	auto v1 = canvas.DuplicateShape(h1, { 62, 3 });
-	canvas.ResizeShape(v1, { 6, 11 });
-	auto v2 = canvas.DuplicateShape(v1, { 38, 3 });
-
-	stringstream output;
-	canvas.Print(output);
-
-	const auto answer =
-		"###############################################################################\n"
-		"#                                                                             #\n"
-		"#            cCcCcCcCcC                                                       #\n"
-		"#        CcCcCcCcCcCcCcCcCc                                                   #\n"
-		"#      cCcCcCcCcCcCcCcCcCcCcC          ++++++                  ++++++         #\n"
-		"#    CcCcCcCcCcCc                      ++++++                  ++++++         #\n"
-		"#   CcCcCcCcC                          ++++++                  ++++++         #\n"
-		"#   cCcCcCc                            ++++++                  ++++++         #\n"
-		"#  cCcCcC                      ++++++++++++++++++++++  ++++++++++++++++++++++ #\n"
-		"#  CcCcCc                      ++++++++++++++++++++++  ++++++++++++++++++++++ #\n"
-		"#  cCcCcC                      ++++++++++++++++++++++  ++++++++++++++++++++++ #\n"
-		"#   cCcCcCc                            ++++++                  ++++++         #\n"
-		"#   CcCcCcCcC                          ++++++                  ++++++         #\n"
-		"#    CcCcCcCcCcCc                      ++++++                  ++++++         #\n"
-		"#      cCcCcCcCcCcCcCcCcCcCcC          ++++++                  ++++++         #\n"
-		"#        CcCcCcCcCcCcCcCcCc                                                   #\n"
-		"#            cCcCcCcCcC                                                       #\n"
-		"#                                                                             #\n"
-		"###############################################################################\n";
-
-	ASSERT_EQUAL(answer, output.str());
+	cache->GetBook(lib.book_names[0]);
+	ASSERT_EQUAL(unpacker->GetMemoryUsedByBooks(), size_t(0));
 }
+
+
+void TestAsync(const Library& lib) {
+	static const int tasks_count = 10;
+	static const int trials_count = 10000;
+
+	auto unpacker = make_shared<BooksUnpacker>();
+	ICache::Settings settings;
+	settings.max_memory = lib.size_in_bytes - 1;
+	auto cache = MakeCache(unpacker, settings);
+
+	vector<future<void>> tasks;
+
+	for (int task_num = 0; task_num < tasks_count; ++task_num) {
+		tasks.push_back(async([&cache, &lib, task_num] {
+			default_random_engine gen;
+			uniform_int_distribution<size_t> dis(0, lib.book_names.size() - 1);
+			for (int i = 0; i < trials_count; ++i) {
+				const auto& book_name = lib.book_names[dis(gen)];
+				ASSERT_EQUAL(
+					cache->GetBook(book_name)->GetContent(),
+					lib.content.find(book_name)->second->GetContent()
+				);
+			}
+			stringstream ss;
+			ss << "Task #" << task_num << " completed\n";
+			cout << ss.str();
+			}));
+	}
+
+	// вызов метода get пробрасывает исключения в основной поток
+	for (auto& task : tasks) {
+		task.get();
+	}
+}
+
 
 int main() {
+	BooksUnpacker unpacker;
+	const Library lib(
+		// Названия книг для локального тестирования. В тестирующей системе курсеры
+		// будет другой набор, намного больше.
+		{
+		  "Sherlock Holmes",
+		  "Don Quixote",
+		  "Harry Potter",
+		  "A Tale of Two Cities",
+		  "The Lord of the Rings",
+		  "Le Petit Prince",
+		  "Alice in Wonderland",
+		  "Dream of the Red Chamber",
+		  "And Then There Were None",
+		  "The Hobbit"
+		},
+		unpacker
+	);
+
+#define RUN_CACHE_TEST(tr, f) tr.RunTest([&lib] { f(lib); }, #f)
+
 	TestRunner tr;
-	RUN_TEST(tr, TestSimple);
-	RUN_TEST(tr, TestSmallTexture);
-	RUN_TEST(tr, TestCow);
-	RUN_TEST(tr, TestCpp);
+	RUN_CACHE_TEST(tr, TestUnpacker);
+	RUN_CACHE_TEST(tr, TestMaxMemory);
+	RUN_CACHE_TEST(tr, TestCaching);
+	RUN_CACHE_TEST(tr, TestSmallCache);
+	RUN_CACHE_TEST(tr, TestAsync);
+
+#undef RUN_CACHE_TEST
 
 #ifdef _MSC_VER
 	system("pause");

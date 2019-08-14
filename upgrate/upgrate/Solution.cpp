@@ -1,100 +1,78 @@
 #include "Common.h"
+#include <list>
+#include <algorithm>
+#include <mutex>
+#include <unordered_map>
+#include <utility>
 
 using namespace std;
 
-// Точка передаётся в локальных координатах
-bool IsPointInSize(Point p, Size s) {
-	return p.x >= 0 && p.y >= 0 && p.x < s.width && p.y < s.height;
-}
-
-Size GetImageSize(const Image& image) {
-	auto width = static_cast<int>(image.empty() ? 0 : image[0].size());
-	auto height = static_cast<int>(image.size());
-	return { width, height };
-}
-
-class Shape : public IShape {
+class LruCache : public ICache {
 public:
-	void SetPosition(Point position) override {
-		position_ = position;
-	}
-	Point GetPosition() const override {
-		return position_;
-	}
-
-	void SetSize(Size size) override {
-		size_ = size;
-	}
-	Size GetSize() const override {
-		return size_;
+	LruCache( shared_ptr<IBooksUnpacker> books_unpacker_,
+			  const Settings& settings_) 
+		: settings(settings_), books_unpacker(books_unpacker_),
+		cacheSize(0)
+	{
 	}
 
-	void SetTexture(shared_ptr<ITexture> texture) override {
-		texture_ = move(texture);
-	}
-	ITexture* GetTexture() const override {
-		return texture_.get();
-	}
-
-	void Draw(Image& image) const override {
-		Point p;
-		auto image_size = GetImageSize(image);
-		for (p.y = 0; p.y < size_.height; ++p.y) {
-			for (p.x = 0; p.x < size_.width; ++p.x) {
-				if (IsPointInShape(p)) {
-					char pixel = '.';
-					if (texture_ && IsPointInSize(p, texture_->GetSize())) {
-						pixel = texture_->GetImage()[p.y][p.x];
-					}
-					Point dp = { position_.x + p.x, position_.y + p.y };
-					if (IsPointInSize(dp, image_size)) {
-						image[dp.y][dp.x] = pixel;
-					}
-				}
-			}
+	BookPtr GetBook(const string& book_name) override {
+		lock_guard<mutex> lock(mtx);
+		BookPtr bookPtr = takeBookFromCacheAndUpdateRating(book_name);
+		if (!bookPtr) {
+			bookPtr = books_unpacker->UnpackBook(book_name);
+			bookPtr = addToCache(bookPtr);
 		}
+
+		return bookPtr;
 	}
 
 private:
-	// Вызывается только для точек в ограничивающем прямоугольнике
-	// Точка передаётся в локальных координатах
-	virtual bool IsPointInShape(Point) const = 0;
+	BookPtr takeBookFromCacheAndUpdateRating(const string& book_name) {
+		if (!mapBooks.count(book_name))
+			return BookPtr();
 
-	shared_ptr<ITexture> texture_;
-	Point position_ = {};
-	Size size_ = {};
-};
+		auto itBook = mapBooks[book_name];
+		books.emplace_front(*itBook);
+		books.erase(itBook);
+		mapBooks[book_name] = books.begin();
 
-class Rectangle : public Shape {
-public:
-	unique_ptr<IShape> Clone() const override {
-		return make_unique<Rectangle>(*this);
+		return books.front();
+	}
+
+	BookPtr addToCache(BookPtr book) {
+
+		books.push_front(book);
+		mapBooks[book->GetName()] = books.begin();
+		cacheSize += book->GetContent().size();
+
+		while (cacheSize >= settings.max_memory) {
+			if (books.empty())
+				return book;
+			cacheSize -= books.back()->GetContent().size();
+			mapBooks.erase(books.back()->GetName());
+			books.pop_back();
+		}	
+
+		if (books.empty())
+			return book;
+
+		return books.front();
 	}
 
 private:
-	bool IsPointInShape(Point) const override {
-		return true;
-	}
+	Settings settings;
+	shared_ptr<IBooksUnpacker> books_unpacker;
+	list<BookPtr> books;
+	unordered_map<string, list<BookPtr>::iterator> mapBooks;
+	size_t cacheSize;
+	mutex mtx;
 };
 
-class Ellipse : public Shape {
-public:
-	unique_ptr<IShape> Clone() const override {
-		return make_unique<Ellipse>(*this);
-	}
 
-private:
-	bool IsPointInShape(Point p) const override {
-		return IsPointInEllipse(p, GetSize());
-	}
-};
-
-unique_ptr<IShape> MakeShape(ShapeType shape_type) {
-	switch (shape_type) {
-	case ShapeType::Rectangle:
-		return make_unique<Rectangle>();
-	case ShapeType::Ellipse:
-		return make_unique<Ellipse>();
-	}
-	return nullptr;
+unique_ptr<ICache> MakeCache(
+	shared_ptr<IBooksUnpacker> books_unpacker,
+	const ICache::Settings& settings
+) {
+	return make_unique<LruCache>(books_unpacker, settings);
 }
