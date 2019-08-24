@@ -1,7 +1,7 @@
 #include "Common.h"
+#include <mutex>
 #include <list>
 #include <algorithm>
-#include <mutex>
 #include <unordered_map>
 #include <utility>
 
@@ -17,10 +17,10 @@ public:
 	}
 
 	BookPtr GetBook(const string& book_name) override {
-		lock_guard<mutex> lock(mtx);
 		BookPtr bookPtr = takeBookFromCacheAndUpdateRating(book_name);
 		if (!bookPtr) {
-			bookPtr = books_unpacker->UnpackBook(book_name);
+            lock_guard<mutex> lock(mtx);
+			bookPtr = move(books_unpacker->UnpackBook(book_name));
 			bookPtr = addToCache(bookPtr);
 		}
 
@@ -29,6 +29,8 @@ public:
 
 private:
 	BookPtr takeBookFromCacheAndUpdateRating(const string& book_name) {
+        lock_guard<mutex> lock(mtx);
+
 		if (!mapBooks.count(book_name))
 			return BookPtr();
 
