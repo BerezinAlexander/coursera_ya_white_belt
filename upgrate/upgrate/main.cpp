@@ -1,74 +1,62 @@
 #include "test_runner.h"
 
-//#include <memory>
-
 #include <cstddef>  // нужно для nullptr_t
 
 using namespace std;
 
 // Реализуйте шаблон класса UniquePtr
+#include <cstddef>
+#include <utility>
+
 template <typename T>
 class UniquePtr {
 private:
-    T* value;
+    T* ptr_;
+
 public:
-    UniquePtr() : value(nullptr) {}
-    UniquePtr(T * ptr) : value(ptr) {}
-
-    UniquePtr(UniquePtr&& other) {
-        value = other.Release();
-    }
-
+    UniquePtr() : ptr_(nullptr) {}
+    UniquePtr(T * ptr) : ptr_(ptr) {}
     UniquePtr(const UniquePtr&) = delete;
-    UniquePtr& operator = (const UniquePtr&) = delete;
-    
-    UniquePtr& operator = (nullptr_t) { 
-        if (value) 
-            delete value; 
-        value = nullptr;
-        return (*this);
+    UniquePtr(UniquePtr&& other) : ptr_(other.ptr_) {
+        other.ptr_ = nullptr;
     }
-    UniquePtr& operator = (UniquePtr&& other) {
-        value = other.Release();
+    UniquePtr& operator = (const UniquePtr&) = delete;
+    UniquePtr& operator = (std::nullptr_t) {
+        Reset(nullptr);
         return *this;
     }
-
+    UniquePtr& operator = (UniquePtr&& other) {
+        Reset(other.ptr_);
+        other.ptr_ = nullptr;
+        return *this;
+    }
     ~UniquePtr() {
-        if (value)
-            delete value;
-        value = nullptr;
+        delete ptr_;
     }
-
     T& operator * () const {
-        return *value;
+        return *ptr_;
     }
-
     T * operator -> () const {
-        return value;
+        return ptr_;
     }
-
     T * Release() {
-        T* result = value;
-        value = nullptr;
+        auto result = ptr_;
+        ptr_ = nullptr;
         return result;
     }
-
     void Reset(T * ptr) {
-        if (value)
-            delete value;
-        value = ptr;
+        delete ptr_;
+        ptr_ = ptr;
     }
-
     void Swap(UniquePtr& other) {
-        T* tmp = value;
-        value = other.Release();
-        other.Reset(tmp);
+        std::swap(ptr_, other.ptr_);
     }
-
     T * Get() const {
-        return value;
+        return ptr_;
     }
 };
+
+
 
 
 struct Item {
@@ -168,8 +156,6 @@ int main() {
     RUN_TEST(tr, TestSwap);
     RUN_TEST(tr, TestReset);
     RUN_TEST(tr, TestFree);
-
-   // unique_ptr<int> ptr;
 
 #ifdef _MSC_VER
 	system("pause");
