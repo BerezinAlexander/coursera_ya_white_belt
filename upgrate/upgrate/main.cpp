@@ -1,161 +1,75 @@
+//#include "old_trip_manager.h"  // со старыми классами все тесты проходят
+#include "new_trip_manager.h"
+
 #include "test_runner.h"
 
-#include <cstddef>  // нужно для nullptr_t
+#include <stdexcept>
 
 using namespace std;
 
-// Реализуйте шаблон класса UniquePtr
-#include <cstddef>
-#include <utility>
 
-template <typename T>
-class UniquePtr {
-private:
-    T* ptr_;
+// Эти определения статических переменных правильнее было бы поместить в соответствующий cpp-файл,
+// но мы для простоты разместим их здесь
 
-public:
-    UniquePtr() : ptr_(nullptr) {}
-    UniquePtr(T * ptr) : ptr_(ptr) {}
-    UniquePtr(const UniquePtr&) = delete;
-    UniquePtr(UniquePtr&& other) : ptr_(other.ptr_) {
-        other.ptr_ = nullptr;
-    }
-    UniquePtr& operator = (const UniquePtr&) = delete;
-    UniquePtr& operator = (std::nullptr_t) {
-        Reset(nullptr);
-        return *this;
-    }
-    UniquePtr& operator = (UniquePtr&& other) {
-        Reset(other.ptr_);
-        other.ptr_ = nullptr;
-        return *this;
-    }
-    ~UniquePtr() {
-        delete ptr_;
-    }
-    T& operator * () const {
-        return *ptr_;
-    }
-    T * operator -> () const {
-        return ptr_;
-    }
-    T * Release() {
-        auto result = ptr_;
-        ptr_ = nullptr;
-        return result;
-    }
-    void Reset(T * ptr) {
-        delete ptr_;
-        ptr_ = ptr;
-    }
-    void Swap(UniquePtr& other) {
-        std::swap(ptr_, other.ptr_);
-    }
-    T * Get() const {
-        return ptr_;
-    }
-};
+int FlightProvider::capacity = 0;
+int FlightProvider::counter = 0;
+
+int HotelProvider::capacity = 0;
+int HotelProvider::counter = 0;
 
 
-
-
-struct Item {
-    static int counter;
-    int value;
-    Item(int v = 0) : value(v) {
-        ++counter;
-    }
-    Item(const Item& other) : value(other.value) {
-        ++counter;
-    }
-    ~Item() {
-        --counter;
-    }
-};
-
-int Item::counter = 0;
-
-
-void TestLifetime() {
-    Item::counter = 0;
+void TestNoOverbooking() {
+    FlightProvider::capacity = 100;
+    HotelProvider::capacity = 100;
+    FlightProvider::counter = 0;
+    HotelProvider::counter = 0;
     {
-        UniquePtr<Item> ptr(new Item);
-        ASSERT_EQUAL(Item::counter, 1);
-
-        ptr.Reset(new Item);
-        ASSERT_EQUAL(Item::counter, 1);
+        TripManager tm;
+        auto trip = tm.Book({});
     }
-    ASSERT_EQUAL(Item::counter, 0);
-
-    {
-        UniquePtr<Item> ptr(new Item);
-        ASSERT_EQUAL(Item::counter, 1);
-
-        auto rawPtr = ptr.Release();
-        ASSERT_EQUAL(Item::counter, 1);
-
-        delete rawPtr;
-        ASSERT_EQUAL(Item::counter, 0);
-    }
-    ASSERT_EQUAL(Item::counter, 0);
+    ASSERT_EQUAL(FlightProvider::counter, 0);
+    ASSERT_EQUAL(HotelProvider::counter, 0);
 }
 
-void TestGetters() {
-    UniquePtr<Item> ptr(new Item(42));
-    ASSERT_EQUAL(ptr.Get()->value, 42);
-    ASSERT_EQUAL((*ptr).value, 42);
-    ASSERT_EQUAL(ptr->value, 42);
-}
-
-void TestSwap() {
-    UniquePtr<Item> ptr(new Item(42));
-    UniquePtr<Item> ptr2(new Item(38));
-    ptr.Swap(ptr2);
-
-    ASSERT_EQUAL(ptr.Get()->value, 38);
-    ASSERT_EQUAL((*ptr).value, 38);
-    ASSERT_EQUAL(ptr->value, 38);
-
-    ASSERT_EQUAL(ptr2.Get()->value, 42);
-    ASSERT_EQUAL((*ptr2).value, 42);
-    ASSERT_EQUAL(ptr2->value, 42);
-}
-
-void TestReset() {
-    UniquePtr<Item> ptr(new Item(42));
-    Item* newItem = new Item(38);
-    ptr.Reset(newItem);
-
-    ASSERT_EQUAL(ptr.Get()->value, 38);
-    ASSERT_EQUAL((*ptr).value, 38);
-    ASSERT_EQUAL(ptr->value, 38);
-}
-
-void TestFree() {
-    {
-        UniquePtr<Item> ptr(new Item(42));
+void TestFlightOverbooking() {
+    FlightProvider::capacity = 1;
+    HotelProvider::capacity = 100;
+    FlightProvider::counter = 0;
+    HotelProvider::counter = 0;
+    try {
+        TripManager tm;
+        auto trip = tm.Book({});
     }
-
-    {
-        UniquePtr<Item> ptr(new Item(42));
-        Item* newItem = new Item(38);
-        ptr.Reset(newItem);
-        ptr.Reset(new Item(25));
-        Item* item = ptr.Release();
-        ptr.Reset(new Item(15));
-        UniquePtr<Item> ptr2(item);
-        ptr = move(ptr2);
-        UniquePtr<Item> ptr3(move(ptr));
+    catch (const runtime_error&) {
+        ASSERT_EQUAL(FlightProvider::counter, 0);
+        ASSERT_EQUAL(HotelProvider::counter, 0);
+        return;
     }
+    Assert(false, "Flight overbooking was expected");
+}
+
+void TestHotelOverbooking() {
+    FlightProvider::capacity = 100;
+    HotelProvider::capacity = 0;
+    FlightProvider::counter = 0;
+    HotelProvider::counter = 0;
+    try {
+        TripManager tm;
+        auto trip = tm.Book({});
+    }
+    catch (const runtime_error& ex) {
+        ASSERT_EQUAL(FlightProvider::counter, 0);
+        ASSERT_EQUAL(HotelProvider::counter, 0);
+        return;
+    }
+    Assert(false, "Hotel overbooking was expected");
 }
 
 int main() {
     TestRunner tr;
-    RUN_TEST(tr, TestLifetime);
-    RUN_TEST(tr, TestGetters);
-    RUN_TEST(tr, TestSwap);
-    RUN_TEST(tr, TestReset);
-    RUN_TEST(tr, TestFree);
+    RUN_TEST(tr, TestNoOverbooking);
+    RUN_TEST(tr, TestFlightOverbooking);
+    RUN_TEST(tr, TestHotelOverbooking);
 
 #ifdef _MSC_VER
 	system("pause");
