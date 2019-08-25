@@ -1,217 +1,175 @@
-#include "Common.h"
 #include "test_runner.h"
 
-#include <atomic>
-#include <future>
-#include <numeric>
-#include <random>
-#include <sstream>
+//#include <memory>
+
+#include <cstddef>  // нужно для nullptr_t
 
 using namespace std;
 
-// Данная реализация интерфейса IBook позволяет отследить объём памяти, в данный
-// момент занимаемый всеми загруженными книгами. Для тестирования своей
-// программы вы можете написать другую реализацию, которая позволит также
-// убедиться, что из кэша выгружаются в первую очередь наименее используемые
-// элементы. Собственно, тестирующая система курсеры имеет как раз более
-// продвинутую реализацию.
-class Book : public IBook {
-public:
-	Book(
-		string name,
-		string content,
-		atomic<size_t>& memory_used_by_books
-	)
-		: name_(move(name))
-		, content_(move(content))
-		, memory_used_by_books_(memory_used_by_books)
-	{
-		memory_used_by_books_ += content_.size();
-	}
-
-	~Book() {
-		memory_used_by_books_ -= content_.size();
-	}
-
-	const string& GetName() const override {
-		return name_;
-	}
-
-	const string& GetContent() const override {
-		return content_;
-	}
-
+// Реализуйте шаблон класса UniquePtr
+template <typename T>
+class UniquePtr {
 private:
-	string name_;
-	string content_;
-	atomic<size_t>& memory_used_by_books_;
-};
-
-// Данная реализация интерфейса IBooksUnpacker позволяет отследить объём памяти,
-// в данный момент занимаемый всеми загруженными книгами и запросить количество
-// обращений к методу UnpackBook(). Для тестирования своей программы вы можете
-// написать другую реализацию. Собственно, тестирующая система курсеры имеет как
-// раз более продвинутую реализацию.
-class BooksUnpacker : public IBooksUnpacker {
+    T* value;
 public:
-	unique_ptr<IBook> UnpackBook(const string& book_name) override {
-		++unpacked_books_count_;
-		return make_unique<Book>(
-			book_name,
-			"Dummy content of the book " + book_name,
-			memory_used_by_books_
-			);
-	}
+    UniquePtr() : value(nullptr) {}
+    UniquePtr(T * ptr) : value(ptr) {}
 
-	size_t GetMemoryUsedByBooks() const {
-		return memory_used_by_books_;
-	}
+    UniquePtr(UniquePtr&& other) {
+        value = other.Release();
+    }
 
-	int GetUnpackedBooksCount() const {
-		return unpacked_books_count_;
-	}
+    UniquePtr(const UniquePtr&) = delete;
+    UniquePtr& operator = (const UniquePtr&) = delete;
+    
+    UniquePtr& operator = (nullptr_t) { 
+        if (value) 
+            delete value; 
+        value = nullptr;
+        return (*this);
+    }
+    UniquePtr& operator = (UniquePtr&& other) {
+        value = other.Release();
+        return *this;
+    }
 
-private:
-	// Шаблонный класс atomic позволяет безопасно использовать скалярный тип из
-	// нескольких потоков. В противном случае у нас было бы состояние гонки.
-	atomic<size_t> memory_used_by_books_ = 0;
-	atomic<int> unpacked_books_count_ = 0;
+    ~UniquePtr() {
+        if (value)
+            delete value;
+        value = nullptr;
+    }
+
+    T& operator * () const {
+        return *value;
+    }
+
+    T * operator -> () const {
+        return value;
+    }
+
+    T * Release() {
+        T* result = value;
+        value = nullptr;
+        return result;
+    }
+
+    void Reset(T * ptr) {
+        if (value)
+            delete value;
+        value = ptr;
+    }
+
+    void Swap(UniquePtr& other) {
+        T* tmp = value;
+        value = other.Release();
+        other.Reset(tmp);
+    }
+
+    T * Get() const {
+        return value;
+    }
 };
 
-struct Library {
-	vector<string> book_names;
-	unordered_map<string, unique_ptr<IBook>> content;
-	size_t size_in_bytes = 0;
 
-	explicit Library(vector<string> a_book_names, IBooksUnpacker& unpacker)
-		: book_names(std::move(a_book_names))
-	{
-		for (const auto& book_name : book_names) {
-			auto& book_content = content[book_name];
-			book_content = unpacker.UnpackBook(book_name);
-			size_in_bytes += book_content->GetContent().size();
-		}
-	}
+struct Item {
+    static int counter;
+    int value;
+    Item(int v = 0) : value(v) {
+        ++counter;
+    }
+    Item(const Item& other) : value(other.value) {
+        ++counter;
+    }
+    ~Item() {
+        --counter;
+    }
 };
 
+int Item::counter = 0;
 
-void TestUnpacker(const Library& lib) {
-	BooksUnpacker unpacker;
-	for (const auto& book_name : lib.book_names) {
-		auto book = unpacker.UnpackBook(book_name);
-		ASSERT_EQUAL(book->GetName(), book_name);
-	}
+
+void TestLifetime() {
+    Item::counter = 0;
+    {
+        UniquePtr<Item> ptr(new Item);
+        ASSERT_EQUAL(Item::counter, 1);
+
+        ptr.Reset(new Item);
+        ASSERT_EQUAL(Item::counter, 1);
+    }
+    ASSERT_EQUAL(Item::counter, 0);
+
+    {
+        UniquePtr<Item> ptr(new Item);
+        ASSERT_EQUAL(Item::counter, 1);
+
+        auto rawPtr = ptr.Release();
+        ASSERT_EQUAL(Item::counter, 1);
+
+        delete rawPtr;
+        ASSERT_EQUAL(Item::counter, 0);
+    }
+    ASSERT_EQUAL(Item::counter, 0);
 }
 
-
-void TestMaxMemory(const Library& lib) {
-	auto unpacker = make_shared<BooksUnpacker>();
-	ICache::Settings settings;
-	settings.max_memory = lib.size_in_bytes / 2;
-	auto cache = MakeCache(unpacker, settings);
-
-	for (const auto&[name, book] : lib.content) {
-		cache->GetBook(name);
-		ASSERT(unpacker->GetMemoryUsedByBooks() <= settings.max_memory);
-	}
+void TestGetters() {
+    UniquePtr<Item> ptr(new Item(42));
+    ASSERT_EQUAL(ptr.Get()->value, 42);
+    ASSERT_EQUAL((*ptr).value, 42);
+    ASSERT_EQUAL(ptr->value, 42);
 }
 
+void TestSwap() {
+    UniquePtr<Item> ptr(new Item(42));
+    UniquePtr<Item> ptr2(new Item(38));
+    ptr.Swap(ptr2);
 
-void TestCaching(const Library& lib) {
-	auto unpacker = make_shared<BooksUnpacker>();
-	ICache::Settings settings;
-	settings.max_memory = lib.size_in_bytes;
-	auto cache = MakeCache(unpacker, settings);
+    ASSERT_EQUAL(ptr.Get()->value, 38);
+    ASSERT_EQUAL((*ptr).value, 38);
+    ASSERT_EQUAL(ptr->value, 38);
 
-	// Если запрашивать одну и ту же книгу подряд, то она определённо должна
-	// возвращаться из кэша. Заметьте, что этого простого теста вовсе
-	// недостаточно, чтобы полностью проверить правильность реализации стратегии
-	// замещения элементов в кэше. Для этих целей можете написать тест
-	// самостоятельно.
-	cache->GetBook(lib.book_names[0]);
-	cache->GetBook(lib.book_names[0]);
-	cache->GetBook(lib.book_names[0]);
-	ASSERT_EQUAL(unpacker->GetUnpackedBooksCount(), 1);
+    ASSERT_EQUAL(ptr2.Get()->value, 42);
+    ASSERT_EQUAL((*ptr2).value, 42);
+    ASSERT_EQUAL(ptr2->value, 42);
 }
 
+void TestReset() {
+    UniquePtr<Item> ptr(new Item(42));
+    Item* newItem = new Item(38);
+    ptr.Reset(newItem);
 
-void TestSmallCache(const Library& lib) {
-	auto unpacker = make_shared<BooksUnpacker>();
-	ICache::Settings settings;
-	settings.max_memory =
-		unpacker->UnpackBook(lib.book_names[0])->GetContent().size() - 1;
-	auto cache = MakeCache(unpacker, settings);
-
-	cache->GetBook(lib.book_names[0]);
-	ASSERT_EQUAL(unpacker->GetMemoryUsedByBooks(), size_t(0));
+    ASSERT_EQUAL(ptr.Get()->value, 38);
+    ASSERT_EQUAL((*ptr).value, 38);
+    ASSERT_EQUAL(ptr->value, 38);
 }
 
+void TestFree() {
+    {
+        UniquePtr<Item> ptr(new Item(42));
+    }
 
-void TestAsync(const Library& lib) {
-	static const int tasks_count = 10;
-	static const int trials_count = 10000;
-
-	auto unpacker = make_shared<BooksUnpacker>();
-	ICache::Settings settings;
-	settings.max_memory = lib.size_in_bytes - 1;
-	auto cache = MakeCache(unpacker, settings);
-
-	vector<future<void>> tasks;
-
-	for (int task_num = 0; task_num < tasks_count; ++task_num) {
-		tasks.push_back(async([&cache, &lib, task_num] {
-			default_random_engine gen;
-			uniform_int_distribution<size_t> dis(0, lib.book_names.size() - 1);
-			for (int i = 0; i < trials_count; ++i) {
-				const auto& book_name = lib.book_names[dis(gen)];
-				ASSERT_EQUAL(
-					cache->GetBook(book_name)->GetContent(),
-					lib.content.find(book_name)->second->GetContent()
-				);
-			}
-			stringstream ss;
-			ss << "Task #" << task_num << " completed\n";
-			cout << ss.str();
-			}));
-	}
-
-	// вызов метода get пробрасывает исключения в основной поток
-	for (auto& task : tasks) {
-		task.get();
-	}
+    {
+        UniquePtr<Item> ptr(new Item(42));
+        Item* newItem = new Item(38);
+        ptr.Reset(newItem);
+        ptr.Reset(new Item(25));
+        Item* item = ptr.Release();
+        ptr.Reset(new Item(15));
+        UniquePtr<Item> ptr2(item);
+        ptr = move(ptr2);
+        UniquePtr<Item> ptr3(move(ptr));
+    }
 }
-
 
 int main() {
-	BooksUnpacker unpacker;
-	const Library lib(
-		// Названия книг для локального тестирования. В тестирующей системе курсеры
-		// будет другой набор, намного больше.
-		{
-		  "Sherlock Holmes",
-		  "Don Quixote",
-		  "Harry Potter",
-		  "A Tale of Two Cities",
-		  "The Lord of the Rings",
-		  "Le Petit Prince",
-		  "Alice in Wonderland",
-		  "Dream of the Red Chamber",
-		  "And Then There Were None",
-		  "The Hobbit"
-		},
-		unpacker
-	);
+    TestRunner tr;
+    RUN_TEST(tr, TestLifetime);
+    RUN_TEST(tr, TestGetters);
+    RUN_TEST(tr, TestSwap);
+    RUN_TEST(tr, TestReset);
+    RUN_TEST(tr, TestFree);
 
-#define RUN_CACHE_TEST(tr, f) tr.RunTest([&lib] { f(lib); }, #f)
-
-	TestRunner tr;
-	RUN_CACHE_TEST(tr, TestUnpacker);
-	RUN_CACHE_TEST(tr, TestMaxMemory);
-	RUN_CACHE_TEST(tr, TestCaching);
-	RUN_CACHE_TEST(tr, TestSmallCache);
-	RUN_CACHE_TEST(tr, TestAsync);
-
-#undef RUN_CACHE_TEST
+   // unique_ptr<int> ptr;
 
 #ifdef _MSC_VER
 	system("pause");
