@@ -10,41 +10,34 @@ namespace RAII {
     class Booking
     {
     public:
-        Booking(Provider * prov, int)
-            : p(move(prov))
-        {
-        }
+        Booking(Provider * prov, int) : p(prov) {}
+        
         Booking() = delete;
         Booking(const Booking & other) = delete;
+        Booking& operator=(const Booking& other) = delete;
+        
         Booking(Booking && other)
-            : p(move(other.p))
+            : p(other.p)
         {
-            lock_guard l(m);
             other.p = nullptr;
         }
-        Booking& operator=(const Booking& other) = delete;
+
         Booking& operator=(Booking && other)
         {
-            lock_guard l(m);
-            if (p != nullptr)
-                p->CancelOrComplete(*this);
-            p = (move(other.p));
+            p = other.p;
             other.p = nullptr;
+            return *this;
         }
 
         ~Booking()
         {
-            if (p != nullptr)
-            {
-                //      lock_guard l(m);
+            if (p) {
                 p->CancelOrComplete(*this);
-                //      p.release();
             }
         }
 
     private:
-        Provider * p;
-        mutex m;
+        Provider * p = nullptr;
     };
 
 }

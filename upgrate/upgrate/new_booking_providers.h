@@ -5,6 +5,7 @@
 
 #include <stdexcept>
 #include <string>
+#include <iostream>
 
 using namespace std;
 
@@ -25,6 +26,7 @@ public:
             throw runtime_error("Flight overbooking");
         }
         ++counter;
+        cout << "[Book]: counter = " << counter << endl;
         return { this, counter };
     }
 
@@ -32,6 +34,7 @@ private:
     // Скрываем эту функцию в private, чтобы её мог позвать только соответствующий friend-класс Booking
     void CancelOrComplete(const Booking& booking) {
         --counter;
+        cout << "[CancelOrComplete]: counter = " << counter << endl;
     }
 
 public:
