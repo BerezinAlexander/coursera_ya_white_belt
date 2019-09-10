@@ -1,43 +1,53 @@
 #pragma once
 
-#include <mutex>
+#include <utility>
 
 using namespace std;
 
 namespace RAII {
 
-    template <class Provider>
-    class Booking
-    {
+    template <typename Provider>
+    class Booking {
+    private:
+        using BookingId = typename Provider::BookingId;
+
+        Provider* provider;
+        BookingId booking_id;
+
     public:
-        Booking(Provider * prov, int) : p(prov) {}
-        
-        Booking() = delete;
-        Booking(const Booking & other) = delete;
-        Booking& operator=(const Booking& other) = delete;
-        
-        Booking(Booking && other)
-            : p(other.p)
+        Booking(Provider* p, const BookingId& id)
+            : provider(p),
+            booking_id(id)
         {
-            other.p = nullptr;
         }
 
-        Booking& operator=(Booking && other)
+        Booking(const Booking&) = delete;
+
+        Booking(Booking&& other)
+            : provider(other.provider),
+            booking_id(other.booking_id)
         {
-            p = other.p;
-            other.p = nullptr;
+            other.provider = nullptr;
+        }
+
+        Booking& operator = (const Booking&) = delete;
+
+        Booking& operator = (Booking&& other) {
+            std::swap(provider, other.provider);
+            std::swap(booking_id, other.booking_id);
             return *this;
         }
 
-        ~Booking()
-        {
-            if (p) {
-                p->CancelOrComplete(*this);
-            }
+        // Эта функция не требуется в тестах, но в реальной программе она может быть нужна
+        BookingId GetId() const {
+            return booking_id;
         }
 
-    private:
-        Provider * p = nullptr;
+        ~Booking() {
+            if (provider != nullptr) {
+                provider->CancelOrComplete(*this);
+            }
+        }
     };
 
 }
