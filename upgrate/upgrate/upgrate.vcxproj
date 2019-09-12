@@ -122,9 +122,6 @@
     <ClCompile Include="profile_advanced.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="booking.h" />
-    <ClInclude Include="new_booking_providers.h" />
-    <ClInclude Include="new_trip_manager.h" />
     <ClInclude Include="profile.h" />
     <ClInclude Include="profile_advanced.h" />
     <ClInclude Include="test_runner.h" />
