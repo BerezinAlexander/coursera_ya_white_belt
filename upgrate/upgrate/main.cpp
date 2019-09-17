@@ -5,7 +5,6 @@
 #include <iostream>
 #include <iterator>
 #include <memory>
-#include <numeric>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -13,7 +12,6 @@
 #include <type_traits>
 #include <unordered_map>
 #include <vector>
-#include <string_view>
 
 using namespace std;
 
@@ -23,7 +21,6 @@ public:
     Range(It begin, It end) : begin_(begin), end_(end) {}
     It begin() const { return begin_; }
     It end() const { return end_; }
-    size_t size() const { return distance(begin_, end_); }
 
 private:
     It begin_;
@@ -115,6 +112,181 @@ struct IndexSegment {
     }
 };
 
+IndexSegment IntersectSegments(IndexSegment lhs, IndexSegment rhs) {
+    const size_t left = max(lhs.left, rhs.left);
+    const size_t right = min(lhs.right, rhs.right);
+    return { left, max(left, right) };
+}
+
+bool AreSegmentsIntersected(IndexSegment lhs, IndexSegment rhs) {
+    return !(lhs.right <= rhs.left || rhs.right <= lhs.left);
+}
+
+
+struct BulkMoneyAdder {
+    MoneyState delta = {};
+};
+
+
+struct BulkTaxApplier {
+    double factor = 1.0;
+
+    static BulkTaxApplier FromPercentage(uint8_t percentage) {
+        return { 1.0 - percentage / 100.0 };
+    }
+};
+
+class BulkLinearUpdater {
+public:
+    BulkLinearUpdater() = default;
+
+    BulkLinearUpdater(const BulkMoneyAdder& add)
+        : add_(add)
+    {}
+
+    BulkLinearUpdater(const BulkTaxApplier& tax)
+        : tax_(tax)
+    {}
+
+    void CombineWith(const BulkLinearUpdater& other) {
+        tax_.factor *= other.tax_.factor;
+        add_.delta.spent += other.add_.delta.spent;
+        add_.delta.earned = add_.delta.earned * other.tax_.factor + other.add_.delta.earned;
+    }
+
+    MoneyState Collapse(const MoneyState& origin, IndexSegment segment) const {
+        return MoneyState{ origin.earned * tax_.factor, origin.spent } +add_.delta * segment.length();
+    }
+
+private:
+    // apply tax first, then add
+    BulkTaxApplier tax_;
+    BulkMoneyAdder add_;
+};
+
+
+template <typename Data, typename BulkOperation>
+class SummingSegmentTree {
+public:
+    SummingSegmentTree(size_t size) : root_(Build({ 0, size })) {}
+
+    Data ComputeSum(IndexSegment segment) const {
+        return this->TraverseWithQuery(root_, segment, ComputeSumVisitor{});
+    }
+
+    void AddBulkOperation(IndexSegment segment, const BulkOperation& operation) {
+        this->TraverseWithQuery(root_, segment, AddBulkOperationVisitor{ operation });
+    }
+
+private:
+    struct Node;
+    using NodeHolder = unique_ptr<Node>;
+
+    struct Node {
+        NodeHolder left;
+        NodeHolder right;
+        IndexSegment segment;
+        Data data;
+        BulkOperation postponed_bulk_operation;
+    };
+
+    NodeHolder root_;
+
+    static NodeHolder Build(IndexSegment segment) {
+        if (segment.empty()) {
+            return nullptr;
+        }
+        else if (segment.length() == 1) {
+            return make_unique<Node>(Node{ .segment = segment });
+        }
+        else {
+            const size_t middle = segment.left + segment.length() / 2;
+            return make_unique<Node>(Node{
+              .left = Build({segment.left, middle}),
+              .right = Build({middle, segment.right}),
+              .segment = segment,
+                });
+        }
+    }
+
+    template <typename Visitor>
+    static typename Visitor::ResultType TraverseWithQuery(const NodeHolder& node, IndexSegment query_segment, Visitor visitor) {
+        if (!node || !AreSegmentsIntersected(node->segment, query_segment)) {
+            return visitor.ProcessEmpty(node);
+        }
+        else {
+            PropagateBulkOperation(node);
+            if (query_segment.Contains(node->segment)) {
+                return visitor.ProcessFull(node);
+            }
+            else {
+                if constexpr (is_void_v<typename Visitor::ResultType>) {
+                    TraverseWithQuery(node->left, query_segment, visitor);
+                    TraverseWithQuery(node->right, query_segment, visitor);
+                    return visitor.ProcessPartial(node, query_segment);
+                }
+                else {
+                    return visitor.ProcessPartial(
+                        node, query_segment,
+                        TraverseWithQuery(node->left, query_segment, visitor),
+                        TraverseWithQuery(node->right, query_segment, visitor)
+                    );
+                }
+            }
+        }
+    }
+
+    class ComputeSumVisitor {
+    public:
+        using ResultType = Data;
+
+        Data ProcessEmpty(const NodeHolder&) const {
+            return {};
+        }
+
+        Data ProcessFull(const NodeHolder& node) const {
+            return node->data;
+        }
+
+        Data ProcessPartial(const NodeHolder&, IndexSegment, const Data& left_result, const Data& right_result) const {
+            return left_result + right_result;
+        }
+    };
+
+    class AddBulkOperationVisitor {
+    public:
+        using ResultType = void;
+
+        explicit AddBulkOperationVisitor(const BulkOperation& operation)
+            : operation_(operation)
+        {}
+
+        void ProcessEmpty(const NodeHolder&) const {}
+
+        void ProcessFull(const NodeHolder& node) const {
+            node->postponed_bulk_operation.CombineWith(operation_);
+            node->data = operation_.Collapse(node->data, node->segment);
+        }
+
+        void ProcessPartial(const NodeHolder& node, IndexSegment) const {
+            node->data = (node->left ? node->left->data : Data()) + (node->right ? node->right->data : Data());
+        }
+
+    private:
+        const BulkOperation& operation_;
+    };
+
+    static void PropagateBulkOperation(const NodeHolder& node) {
+        for (auto* child_ptr : { node->left.get(), node->right.get() }) {
+            if (child_ptr) {
+                child_ptr->postponed_bulk_operation.CombineWith(node->postponed_bulk_operation);
+                child_ptr->data = node->postponed_bulk_operation.Collapse(child_ptr->data, child_ptr->segment);
+            }
+        }
+        node->postponed_bulk_operation = BulkOperation();
+    }
+};
+
 
 class Date {
 public:
@@ -129,14 +301,15 @@ public:
 
     // Weird legacy, can't wait for std::chrono::year_month_day
     time_t AsTimestamp() const {
-        std::tm t;
-        t.tm_sec = 0;
-        t.tm_min = 0;
-        t.tm_hour = 0;
-        t.tm_mday = day_;
-        t.tm_mon = month_ - 1;
-        t.tm_year = year_ - 1900;
-        t.tm_isdst = 0;
+        std::tm t{
+          .tm_sec = 0,
+          .tm_min = 0,
+          .tm_hour = 0,
+          .tm_mday = day_,
+          .tm_mon = month_ - 1,
+          .tm_year = year_ - 1900,
+          .tm_isdst = 0,
+        };
         return mktime(&t);
     }
 
@@ -170,17 +343,9 @@ IndexSegment MakeDateSegment(const Date& date_from, const Date& date_to) {
 }
 
 
-class BudgetManager : public vector<MoneyState> {
+class BudgetManager : public SummingSegmentTree<MoneyState, BulkLinearUpdater> {
 public:
-    BudgetManager() : vector(DAY_COUNT) {}
-    auto MakeDateRange(const Date& date_from, const Date& date_to) const {
-        const auto segment = MakeDateSegment(date_from, date_to);
-        return Range(begin() + segment.left, begin() + segment.right);
-    }
-    auto MakeDateRange(const Date& date_from, const Date& date_to) {
-        const auto segment = MakeDateSegment(date_from, date_to);
-        return Range(begin() + segment.left, begin() + segment.right);
-    }
+    BudgetManager() : SummingSegmentTree(DAY_COUNT) {}
 };
 
 
@@ -229,8 +394,7 @@ struct ComputeIncomeRequest : ReadRequest<double> {
     }
 
     double Process(const BudgetManager& manager) const override {
-        const auto range = manager.MakeDateRange(date_from, date_to);
-        return accumulate(begin(range), end(range), MoneyState{}).ComputeIncome();
+        return manager.ComputeSum(MakeDateSegment(date_from, date_to)).ComputeIncome();
     }
 
     Date date_from = START_DATE;
@@ -249,17 +413,10 @@ struct AddMoneyRequest : ModifyRequest {
     }
 
     void Process(BudgetManager& manager) const override {
-        const auto date_range = manager.MakeDateRange(date_from, date_to);
-        const double daily_value = value * 1.0 / size(date_range);
-
-        //const MoneyState daily_change2{ daily_value, 0 };
-
-        const MoneyState daily_change = (SIGN == 1) 
-                                        ? MoneyState{ daily_value, 0 }
-                                        : MoneyState{ 0, daily_value };
-        for (auto& money : date_range) {
-            money += daily_change;
-        }
+        const auto date_segment = MakeDateSegment(date_from, date_to);
+        const double daily_value = value * 1.0 / date_segment.length();
+        const MoneyState daily_change = SIGN == 1 ? MoneyState{ .earned = daily_value } : MoneyState{ .spent = daily_value };
+        manager.AddBulkOperation(date_segment, BulkMoneyAdder{ daily_change });
     }
 
     Date date_from = START_DATE;
@@ -276,9 +433,7 @@ struct PayTaxRequest : ModifyRequest {
     }
 
     void Process(BudgetManager& manager) const override {
-        for (auto& money : manager.MakeDateRange(date_from, date_to)) {
-            money.earned *= 1 - percentage / 100.0;
-        }
+        manager.AddBulkOperation(MakeDateSegment(date_from, date_to), BulkTaxApplier::FromPercentage(percentage));
     }
 
     Date date_from = START_DATE;
