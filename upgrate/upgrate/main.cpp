@@ -1,233 +1,384 @@
-#include <algorithm>
-#include <iostream>
-#include <string>
-#include <string_view>
-#include <vector>
+#include <cmath>
+#include <cstdint>
 #include <ctime>
+#include <exception>
+#include <iostream>
+#include <iterator>
+#include <memory>
+#include <numeric>
+#include <optional>
 #include <sstream>
-#include <iomanip>
-
-#include "test_runner.h"
-
-#include "Date.h"
-#include "FinanceManager.h"
+#include <string>
+#include <system_error>
+#include <type_traits>
+#include <unordered_map>
+#include <vector>
+#include <string_view>
 
 using namespace std;
 
-std::istream& operator >> (std::istream& input, Date& date) {
-    std::string buf;
-    std::getline(input, buf, '-');
-    int year = stoi(buf);
-    std::getline(input, buf, '-');
-    int month = stoi(buf);
-    int day;
-    input >> day;
+template<typename It>
+class Range {
+public:
+    Range(It begin, It end) : begin_(begin), end_(end) {}
+    It begin() const { return begin_; }
+    It end() const { return end_; }
+    size_t size() const { return distance(begin_, end_); }
 
-    date = Date(year, month, day);
+private:
+    It begin_;
+    It end_;
+};
 
-    return input;
-}
-
-void Process(istream& input, ostream& output) {
-
-    int count;
-    input >> count;
-
-    FinanceManager fm;
-
-    for (int i = 0; i < count; ++i) {
-        string type;
-        input >> type;
-
-        if (type == "ComputeIncome") {
-            Date from, to;
-            input >> from >> to;
-            double income = fm.ComputeIncome(from, to);
-            output << fixed << income << endl;
-        }
-        else if (type == "Earn") {
-            Date from, to;
-            int value = 0;
-            input >> from >> to >> value;
-            fm.Earn(from, to, value);
-        }
-        else if (type == "PayTax") {
-            Date from, to;
-            int percentage = 0;
-            input >> from >> to >> percentage;
-            fm.PayTax(from, to, percentage);
-        }
-        else if (type == "Spend") {
-            Date from, to;
-            int value = 0;
-            input >> from >> to >> value;
-            fm.Spend(from, to, value);
-        }
+pair<string_view, optional<string_view>> SplitTwoStrict(string_view s, string_view delimiter = " ") {
+    const size_t pos = s.find(delimiter);
+    if (pos == s.npos) {
+        return { s, nullopt };
+    }
+    else {
+        return { s.substr(0, pos), s.substr(pos + delimiter.length()) };
     }
 }
 
-inline bool compareStrings(istream& output, istream& idealOutput) {
-    vector<double> values;
-    double value = 0;
-    while (output >> value) {
-        values.emplace_back(value);
+pair<string_view, string_view> SplitTwo(string_view s, string_view delimiter = " ") {
+    const auto[lhs, rhs_opt] = SplitTwoStrict(s, delimiter);
+    return { lhs, rhs_opt.value_or("") };
+}
+
+string_view ReadToken(string_view& s, string_view delimiter = " ") {
+    const auto[lhs, rhs] = SplitTwo(s, delimiter);
+    s = rhs;
+    return lhs;
+}
+
+int ConvertToInt(string_view str) {
+    // use std::from_chars when available to git rid of string copy
+    size_t pos;
+    const int result = stoi(string(str), &pos);
+    if (pos != str.length()) {
+        std::stringstream error;
+        error << "string " << str << " contains " << (str.length() - pos) << " trailing chars";
+        throw invalid_argument(error.str());
+    }
+    return result;
+}
+
+template <typename Number>
+void ValidateBounds(Number number_to_check, Number min_value, Number max_value) {
+    if (number_to_check < min_value || number_to_check > max_value) {
+        std::stringstream error;
+        error << number_to_check << " is out of [" << min_value << ", " << max_value << "]";
+        throw out_of_range(error.str());
+    }
+}
+
+struct MoneyState {
+    double earned = 0.0;
+    double spent = 0.0;
+
+    double ComputeIncome() const {
+        return earned - spent;
     }
 
-    vector<double> idealValues;
-    while (idealOutput >> value) {
-        idealValues.emplace_back(value);
+    MoneyState& operator+=(const MoneyState& other) {
+        earned += other.earned;
+        spent += other.spent;
+        return *this;
     }
 
-    if (values.size() != idealValues.size())
-        return false;
-
-    for (size_t i = 0; i < values.size(); ++i) {
-        ASSERT_EQUAL(abs(values[i] - idealValues[i]) < 0.0001, true);
+    MoneyState operator+(const MoneyState& other) const {
+        return MoneyState(*this) += other;
     }
 
-    return true;
+    MoneyState operator*(double factor) const {
+        return { earned * factor, spent * factor };
+    }
+};
+
+ostream& operator<<(ostream& stream, const MoneyState& state) {
+    return stream << "{+" << state.earned << ", -" << state.spent << "}";
 }
 
-void TestDataLess() {
-    ASSERT_EQUAL(Date(2000, 1, 1) < Date(2000, 1, 2), true);
-    ASSERT_EQUAL(Date(2000, 1, 1) < Date(2000, 2, 1), true);
-    ASSERT_EQUAL(Date(2000, 1, 2) < Date(2000, 2, 1), true);
+struct IndexSegment {
+    size_t left;
+    size_t right;
+
+    size_t length() const {
+        return right - left;
+    }
+    bool empty() const {
+        return length() == 0;
+    }
+
+    bool Contains(IndexSegment other) const {
+        return left <= other.left && other.right <= right;
+    }
+};
+
+
+class Date {
+public:
+    static Date FromString(string_view str) {
+        const int year = ConvertToInt(ReadToken(str, "-"));
+        const int month = ConvertToInt(ReadToken(str, "-"));
+        ValidateBounds(month, 1, 12);
+        const int day = ConvertToInt(str);
+        ValidateBounds(day, 1, 31);
+        return { year, month, day };
+    }
+
+    // Weird legacy, can't wait for std::chrono::year_month_day
+    time_t AsTimestamp() const {
+        std::tm t;
+        t.tm_sec = 0;
+        t.tm_min = 0;
+        t.tm_hour = 0;
+        t.tm_mday = day_;
+        t.tm_mon = month_ - 1;
+        t.tm_year = year_ - 1900;
+        t.tm_isdst = 0;
+        return mktime(&t);
+    }
+
+private:
+    int year_;
+    int month_;
+    int day_;
+
+    Date(int year, int month, int day)
+        : year_(year), month_(month), day_(day)
+    {}
+};
+
+int ComputeDaysDiff(const Date& date_to, const Date& date_from) {
+    const time_t timestamp_to = date_to.AsTimestamp();
+    const time_t timestamp_from = date_from.AsTimestamp();
+    static constexpr int SECONDS_IN_DAY = 60 * 60 * 24;
+    return (timestamp_to - timestamp_from) / SECONDS_IN_DAY;
 }
 
-void Test1() {
-    string sInput = "\
-2\n\
-Earn 2000-01-01 2000-01-01 20\n\
-ComputeIncome 2000-01-01 2001-01-01\n";
+static const Date START_DATE = Date::FromString("2000-01-01");
+static const Date END_DATE = Date::FromString("2100-01-01");
+static const size_t DAY_COUNT = ComputeDaysDiff(END_DATE, START_DATE);
 
-    stringstream input(sInput);
-
-    stringstream output;
-
-    Process(input, output);
-
-    string sIdeal = "\
-20\n";
-    stringstream ssIdeal;
-    ssIdeal << sIdeal;
-    
-    ASSERT_EQUAL(compareStrings(output, ssIdeal), true);
+size_t ComputeDayIndex(const Date& date) {
+    return ComputeDaysDiff(date, START_DATE);
 }
 
-void Test2() {
-    string sInput = "\
-2\n\
-Earn 2000-01-02 2000-01-06 20\n\
-ComputeIncome 2000-01-02 2000-01-02\n";
-
-    stringstream input(sInput);
-
-    stringstream output;
-
-    Process(input, output);
-
-    string sIdeal = "\
-4\n";
-    stringstream ssIdeal;
-    ssIdeal << sIdeal;
-
-    ASSERT_EQUAL(compareStrings(output, ssIdeal), true);
-}
-
-void Test3() {
-    string sInput = "\
-3\n\
-Earn 2000-01-02 2000-04-21 1000000\n\
-PayTax 2000-01-02 2000-05-03 13\n\
-ComputeIncome 2000-01-01 2001-01-01\n";
-
-    stringstream input(sInput);
-
-    stringstream output;
-
-    Process(input, output);
-
-    string sIdeal = "\
-870000\n";
-    stringstream ssIdeal;
-    ssIdeal << sIdeal;
-
-    ASSERT_EQUAL(compareStrings(output, ssIdeal), true);
+IndexSegment MakeDateSegment(const Date& date_from, const Date& date_to) {
+    return { ComputeDayIndex(date_from), ComputeDayIndex(date_to) + 1 };
 }
 
 
-void TestMain() {
-    string sInput = "\
-8\n\
-Earn 2000-01-02 2000-01-06 20\n\
-ComputeIncome 2000-01-01 2001-01-01\n\
-PayTax 2000-01-02 2000-01-03 13\n\
-ComputeIncome 2000-01-01 2001-01-01\n\
-Earn 2000-01-03 2000-01-03 10\n\
-ComputeIncome 2000-01-01 2001-01-01\n\
-PayTax 2000-01-03 2000-01-03 13\n\
-ComputeIncome 2000-01-01 2001-01-01\n";
+class BudgetManager : public vector<MoneyState> {
+public:
+    BudgetManager() : vector(DAY_COUNT) {}
+    auto MakeDateRange(const Date& date_from, const Date& date_to) const {
+        const auto segment = MakeDateSegment(date_from, date_to);
+        return Range(begin() + segment.left, begin() + segment.right);
+    }
+    auto MakeDateRange(const Date& date_from, const Date& date_to) {
+        const auto segment = MakeDateSegment(date_from, date_to);
+        return Range(begin() + segment.left, begin() + segment.right);
+    }
+};
 
-    stringstream input(sInput);
 
-    stringstream output;
+struct Request;
+using RequestHolder = unique_ptr<Request>;
 
-    Process(input, output);
+struct Request {
+    enum class Type {
+        COMPUTE_INCOME,
+        EARN,
+        SPEND,
+        PAY_TAX
+    };
 
-    string sIdeal = "\
-20\n\
-18.96\n\
-28.96\n\
-27.2076\n";
-    stringstream ssIdeal;
-    ssIdeal << sIdeal;
+    Request(Type type) : type(type) {}
+    static RequestHolder Create(Type type);
+    virtual void ParseFrom(string_view input) = 0;
+    virtual ~Request() = default;
 
-    ASSERT_EQUAL(compareStrings(output, ssIdeal), true);
+    const Type type;
+};
+
+const unordered_map<string_view, Request::Type> STR_TO_REQUEST_TYPE = {
+    {"ComputeIncome", Request::Type::COMPUTE_INCOME},
+    {"Earn", Request::Type::EARN},
+    {"Spend", Request::Type::SPEND},
+    {"PayTax", Request::Type::PAY_TAX},
+};
+
+template <typename ResultType>
+struct ReadRequest : Request {
+    using Request::Request;
+    virtual ResultType Process(const BudgetManager& manager) const = 0;
+};
+
+struct ModifyRequest : Request {
+    using Request::Request;
+    virtual void Process(BudgetManager& manager) const = 0;
+};
+
+struct ComputeIncomeRequest : ReadRequest<double> {
+    ComputeIncomeRequest() : ReadRequest(Type::COMPUTE_INCOME) {}
+    void ParseFrom(string_view input) override {
+        date_from = Date::FromString(ReadToken(input));
+        date_to = Date::FromString(input);
+    }
+
+    double Process(const BudgetManager& manager) const override {
+        const auto range = manager.MakeDateRange(date_from, date_to);
+        return accumulate(begin(range), end(range), MoneyState{}).ComputeIncome();
+    }
+
+    Date date_from = START_DATE;
+    Date date_to = START_DATE;
+};
+
+template <int SIGN>
+struct AddMoneyRequest : ModifyRequest {
+    static_assert(SIGN == -1 || SIGN == 1);
+
+    AddMoneyRequest() : ModifyRequest(SIGN == 1 ? Type::EARN : Type::SPEND) {}
+    void ParseFrom(string_view input) override {
+        date_from = Date::FromString(ReadToken(input));
+        date_to = Date::FromString(ReadToken(input));
+        value = ConvertToInt(input);
+    }
+
+    void Process(BudgetManager& manager) const override {
+        const auto date_range = manager.MakeDateRange(date_from, date_to);
+        const double daily_value = value * 1.0 / size(date_range);
+
+        //const MoneyState daily_change2{ daily_value, 0 };
+
+        const MoneyState daily_change = (SIGN == 1) 
+                                        ? MoneyState{ daily_value, 0 }
+                                        : MoneyState{ 0, daily_value };
+        for (auto& money : date_range) {
+            money += daily_change;
+        }
+    }
+
+    Date date_from = START_DATE;
+    Date date_to = START_DATE;
+    size_t value = 0;
+};
+
+struct PayTaxRequest : ModifyRequest {
+    PayTaxRequest() : ModifyRequest(Type::PAY_TAX) {}
+    void ParseFrom(string_view input) override {
+        date_from = Date::FromString(ReadToken(input));
+        date_to = Date::FromString(ReadToken(input));
+        percentage = ConvertToInt(input);
+    }
+
+    void Process(BudgetManager& manager) const override {
+        for (auto& money : manager.MakeDateRange(date_from, date_to)) {
+            money.earned *= 1 - percentage / 100.0;
+        }
+    }
+
+    Date date_from = START_DATE;
+    Date date_to = START_DATE;
+    uint8_t percentage = 0;
+};
+
+RequestHolder Request::Create(Request::Type type) {
+    switch (type) {
+    case Request::Type::COMPUTE_INCOME:
+        return make_unique<ComputeIncomeRequest>();
+    case Request::Type::EARN:
+        return make_unique<AddMoneyRequest<+1>>();
+    case Request::Type::SPEND:
+        return make_unique<AddMoneyRequest<-1>>();
+    case Request::Type::PAY_TAX:
+        return make_unique<PayTaxRequest>();
+    default:
+        return nullptr;
+    }
 }
 
-void TestMain2() {
-    string sInput = "\
-8\n\
-Earn 2000-01-02 2000-01-06 20\n\
-ComputeIncome 2000-01-01 2001-01-01\n\
-PayTax 2000-01-02 2000-01-03 13\n\
-ComputeIncome 2000-01-01 2001-01-01\n\
-Spend 2000-12-30 2001-01-02 14\n\
-ComputeIncome 2000-01-01 2001-01-01\n\
-PayTax 2000-12-30 2000-12-30 13\n\
-ComputeIncome 2000-01-01 2001-01-01\n";
-
-    stringstream input(sInput);
-
-    stringstream output;
-
-    Process(input, output);
-
-    string sIdeal = "\
-20\n\
-18.96\n\
-8.46\n\
-8.46\n";
-    stringstream ssIdeal;
-    ssIdeal << sIdeal;
-
-    ASSERT_EQUAL(compareStrings(output, ssIdeal), true);
+template <typename Number>
+Number ReadNumberOnLine(istream& stream) {
+    Number number;
+    stream >> number;
+    string dummy;
+    getline(stream, dummy);
+    return number;
 }
+
+optional<Request::Type> ConvertRequestTypeFromString(string_view type_str) {
+    if (const auto it = STR_TO_REQUEST_TYPE.find(type_str);
+        it != STR_TO_REQUEST_TYPE.end()) {
+        return it->second;
+    }
+    else {
+        return nullopt;
+    }
+}
+
+RequestHolder ParseRequest(string_view request_str) {
+    const auto request_type = ConvertRequestTypeFromString(ReadToken(request_str));
+    if (!request_type) {
+        return nullptr;
+    }
+    RequestHolder request = Request::Create(*request_type);
+    if (request) {
+        request->ParseFrom(request_str);
+    };
+    return request;
+}
+
+vector<RequestHolder> ReadRequests(istream& in_stream = cin) {
+    const size_t request_count = ReadNumberOnLine<size_t>(in_stream);
+
+    vector<RequestHolder> requests;
+    requests.reserve(request_count);
+
+    for (size_t i = 0; i < request_count; ++i) {
+        string request_str;
+        getline(in_stream, request_str);
+        if (auto request = ParseRequest(request_str)) {
+            requests.push_back(move(request));
+        }
+    }
+    return requests;
+}
+
+vector<double> ProcessRequests(const vector<RequestHolder>& requests) {
+    vector<double> responses;
+    BudgetManager manager;
+    for (const auto& request_holder : requests) {
+        if (request_holder->type == Request::Type::COMPUTE_INCOME) {
+            const auto& request = static_cast<const ComputeIncomeRequest&>(*request_holder);
+            responses.push_back(request.Process(manager));
+        }
+        else {
+            const auto& request = static_cast<const ModifyRequest&>(*request_holder);
+            request.Process(manager);
+        }
+    }
+    return responses;
+}
+
+void PrintResponses(const vector<double>& responses, ostream& stream = cout) {
+    for (const double response : responses) {
+        stream << response << endl;
+    }
+}
+
 
 int main() {
+    cout.precision(25);
+    const auto requests = ReadRequests();
+    const auto responses = ProcessRequests(requests);
+    PrintResponses(responses);
 
 #ifdef _MSC_VER
-    TestRunner tr;
-    RUN_TEST(tr, TestDataLess);
-    RUN_TEST(tr, Test1);
-    RUN_TEST(tr, Test2);
-    RUN_TEST(tr, Test3);
-    RUN_TEST(tr, TestMain);
-    RUN_TEST(tr, TestMain2);
-
 	system("pause");
-#else
-    Process(cin, cout);
 #endif
 
 	return 0;
