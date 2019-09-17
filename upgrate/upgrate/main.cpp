@@ -53,8 +53,15 @@ void Process(istream& input, ostream& output) {
         }
         else if (type == "PayTax") {
             Date from, to;
-            input >> from >> to;
-            fm.PayTax(from, to);
+            int percentage = 0;
+            input >> from >> to >> percentage;
+            fm.PayTax(from, to, percentage);
+        }
+        else if (type == "Spend") {
+            Date from, to;
+            int value = 0;
+            input >> from >> to >> value;
+            fm.Spend(from, to, value);
         }
     }
 }
@@ -131,7 +138,7 @@ void Test3() {
     string sInput = "\
 3\n\
 Earn 2000-01-02 2000-04-21 1000000\n\
-PayTax 2000-01-02 2000-05-03\n\
+PayTax 2000-01-02 2000-05-03 13\n\
 ComputeIncome 2000-01-01 2001-01-01\n";
 
     stringstream input(sInput);
@@ -154,11 +161,11 @@ void TestMain() {
 8\n\
 Earn 2000-01-02 2000-01-06 20\n\
 ComputeIncome 2000-01-01 2001-01-01\n\
-PayTax 2000-01-02 2000-01-03\n\
+PayTax 2000-01-02 2000-01-03 13\n\
 ComputeIncome 2000-01-01 2001-01-01\n\
 Earn 2000-01-03 2000-01-03 10\n\
 ComputeIncome 2000-01-01 2001-01-01\n\
-PayTax 2000-01-03 2000-01-03\n\
+PayTax 2000-01-03 2000-01-03 13\n\
 ComputeIncome 2000-01-01 2001-01-01\n";
 
     stringstream input(sInput);
@@ -178,6 +185,35 @@ ComputeIncome 2000-01-01 2001-01-01\n";
     ASSERT_EQUAL(compareStrings(output, ssIdeal), true);
 }
 
+void TestMain2() {
+    string sInput = "\
+8\n\
+Earn 2000-01-02 2000-01-06 20\n\
+ComputeIncome 2000-01-01 2001-01-01\n\
+PayTax 2000-01-02 2000-01-03 13\n\
+ComputeIncome 2000-01-01 2001-01-01\n\
+Spend 2000-12-30 2001-01-02 14\n\
+ComputeIncome 2000-01-01 2001-01-01\n\
+PayTax 2000-12-30 2000-12-30 13\n\
+ComputeIncome 2000-01-01 2001-01-01\n";
+
+    stringstream input(sInput);
+
+    stringstream output;
+
+    Process(input, output);
+
+    string sIdeal = "\
+20\n\
+18.96\n\
+8.46\n\
+8.46\n";
+    stringstream ssIdeal;
+    ssIdeal << sIdeal;
+
+    ASSERT_EQUAL(compareStrings(output, ssIdeal), true);
+}
+
 int main() {
 
 #ifdef _MSC_VER
@@ -187,6 +223,7 @@ int main() {
     RUN_TEST(tr, Test2);
     RUN_TEST(tr, Test3);
     RUN_TEST(tr, TestMain);
+    RUN_TEST(tr, TestMain2);
 
 	system("pause");
 #else
