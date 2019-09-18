@@ -126,10 +126,14 @@ class DirectoryTransport {
 public:
     void addBus(string_view number, const vector<string>& stops) {
         buses[string(number)] = stops;
+        for (const auto& stop : stops) {
+            stopBuses[stop].insert(number);
+        }
     }
 
     void addStop(string_view name, double lat, double lon) {
         stops[string(name)] = {lat, lon};
+        stopBuses[name];
     }
 
     BusInfo CalcBusInfo(string_view number) const {
@@ -150,6 +154,13 @@ public:
         busesInfoCache[string(number)] = info;
 
         return info;
+    }
+
+    pair<bool, set<string_view>> CalcStopInfo(string_view name) const {
+        if (!stopBuses.count(name))
+            return { false, set<string_view>() };
+
+        return { true, stopBuses.at(name) };
     }
 
 private:
@@ -202,6 +213,7 @@ private:
 private:
     unordered_map<string, vector<string>> buses;
     unordered_map<string, pair<double, double>> stops;
+    unordered_map<string_view, set<string_view>> stopBuses;
     mutable unordered_map<string, BusInfo> busesInfoCache;
 };
 
@@ -425,7 +437,8 @@ using DatabaseRequestHolder = unique_ptr<DatabaseRequest>;
 
 struct DatabaseRequest {
     enum class Type {
-        BUS
+        BUS,
+        STOP
     };
 
     DatabaseRequest(Type type) : type(type) {}
@@ -437,7 +450,8 @@ struct DatabaseRequest {
 };
 
 const unordered_map<string_view, DatabaseRequest::Type> STR_TO_DATABASE_REQUEST_TYPE = {
-    {"Bus", DatabaseRequest::Type::BUS}
+    {"Bus", DatabaseRequest::Type::BUS},
+    {"Stop", DatabaseRequest::Type::STOP}
 };
 
 
@@ -452,8 +466,8 @@ struct ReadDatabaseRequest : DatabaseRequest {
 //    virtual void Process(DirectoryTransport& directory) const = 0;
 //};
 
-struct ComputeBusDatabaseRequest : ReadDatabaseRequest<BusInfo> {
-    ComputeBusDatabaseRequest() : ReadDatabaseRequest<BusInfo>(Type::BUS) {}
+struct ComputeBusDatabaseRequest : ReadDatabaseRequest<string> {
+    ComputeBusDatabaseRequest() : ReadDatabaseRequest<string>(Type::BUS) {}
 
     void ParseForm(string_view input) override {
         try {
@@ -465,19 +479,66 @@ struct ComputeBusDatabaseRequest : ReadDatabaseRequest<BusInfo> {
         }
     }
 
-    BusInfo Process(DirectoryTransport& directory) const override {
-        return directory.CalcBusInfo(number);
+    string Process(DirectoryTransport& directory) const override {
+        BusInfo info = directory.CalcBusInfo(number);
+        stringstream stream;
+        if (info.stopCount == 0) {
+            stream << "Bus " << info.busNumber << ": not found" << endl;
+        }
+        else {
+            stream << "Bus " << info.busNumber << ": "
+                << info.stopCount << " stops on route, "
+                << info.uniqueStopCount << " unique stops, "
+                << setprecision(6) << info.lengthRoute << " route length" << endl;
+        }
+        return stream.str();
     }
 
     string number;
+};
+
+struct ComputeStopDatabaseRequest : ReadDatabaseRequest<string> {
+    ComputeStopDatabaseRequest() : ReadDatabaseRequest<string>(Type::STOP) {}
+
+    void ParseForm(string_view input) override {
+        try {
+            name = ReadDatabaseBusNumber(input);
+        }
+        catch (...) {
+            cerr << "Exception: ReadDatabaseBusNumber is failed" << endl;
+            throw;
+        }
+    }
+
+    string Process(DirectoryTransport& directory) const override {
+        auto[isFound, buses] = directory.CalcStopInfo(name);
+        stringstream stream;
+        if (!isFound) {
+            stream << "Stop " << name << ": not found" << endl;
+        }
+        else if (buses.empty()) {
+            stream << "Stop " << name << ": no buses" << endl;
+        }
+        else {
+            stream << "Stop " << name << ": buses";
+            for (auto& bus : buses) {
+                stream << " " << bus;
+            }
+            stream << endl;
+        }
+
+        return stream.str();
+    }
+
+    string name;
 };
 
 DatabaseRequestHolder DatabaseRequest::Create(DatabaseRequest::Type type) {
     switch (type) {
     case DatabaseRequest::Type::BUS:
         return make_unique<ComputeBusDatabaseRequest>();
-    //case DatabaseRequest::Type::STOP:
-    //    return make_unique<ComputeStopDatabaseRequest>();
+    case DatabaseRequest::Type::STOP:
+        return make_unique<ComputeStopDatabaseRequest>();
         //case Request::Type::SPEND:
         //    return make_unique<AddMoneyRequest<-1>>();
         //case Request::Type::PAY_TAX:
@@ -534,11 +595,17 @@ vector<DatabaseRequestHolder> ReadDatabaseRequests(istream& in_stream = cin) {
     return requests;
 }
 
-vector<BusInfo> ProcessDatabaseRequests(DirectoryTransport& directory, const vector<DatabaseRequestHolder>& requests) {
-    vector<BusInfo> responses;
+vector<string> ProcessDatabaseRequests(DirectoryTransport& directory, const vector<DatabaseRequestHolder>& requests) {
+    vector<string> responses;
     for (const auto& request_holder : requests) {
-        const auto& request = dynamic_cast<const ComputeBusDatabaseRequest&>(*request_holder);
-        responses.push_back(request.Process(directory));
+        if (request_holder->type == DatabaseRequest::Type::BUS) {
+            const auto& request = dynamic_cast<const ComputeBusDatabaseRequest&>(*request_holder);
+            responses.push_back(move(request.Process(directory)));
+        }
+        else if (request_holder->type == DatabaseRequest::Type::STOP) {
+            const auto& request = dynamic_cast<const ComputeStopDatabaseRequest&>(*request_holder);
+            responses.push_back(move(request.Process(directory)));
+        }
 
 
         //if (request_holder->type == Request::Type::COMPUTE_INCOME) {
@@ -553,17 +620,18 @@ vector<BusInfo> ProcessDatabaseRequests(DirectoryTransport& directory, const vec
     return responses;
 }
 
-void PrintResponses(const vector<BusInfo>& responses, ostream& stream = cout) {
-    for (const BusInfo& response : responses) {
-        if (response.stopCount == 0) {
-            stream << "Bus " << response.busNumber << ": not found" << endl;
-        }
-        else {
-            stream << "Bus " << response.busNumber << ": "
-                << response.stopCount << " stops on route, "
-                << response.uniqueStopCount << " unique stops, "
-                << setprecision(6) << response.lengthRoute << " route length" << endl;
-        }
+void PrintResponses(const vector<string>& responses, ostream& stream = cout) {
+    for (const string& response : responses) {
+        stream << response;
+        //if (response.stopCount == 0) {
+        //    stream << "Bus " << response.busNumber << ": not found" << endl;
+        //}
+        //else {
+        //    stream << "Bus " << response.busNumber << ": "
+        //        << response.stopCount << " stops on route, "
+        //        << response.uniqueStopCount << " unique stops, "
+        //        << setprecision(6) << response.lengthRoute << " route length" << endl;
+        //}
     }
 }
 
@@ -631,12 +699,60 @@ Bus 750: 2 stops on route, 2 unique stops, 1693.26 route length\n\
     ASSERT_EQUAL(sIdeal, ssOutput.str());
 }
 
+void TestMain2() {
+    string sInput = "\
+13\n\
+Stop Tolstopaltsevo: 55.611087, 37.20829\n\
+Stop Marushkino: 55.595884, 37.209755\n\
+Bus 256: Biryulyovo Zapadnoye > Biryusinka > Universam > Biryulyovo Tovarnaya > Biryulyovo Passazhirskaya > Biryulyovo Zapadnoye\n\
+Bus 750: Tolstopaltsevo - Marushkino - Rasskazovka\n\
+Stop Rasskazovka: 55.632761, 37.333324\n\
+Stop Biryulyovo Zapadnoye: 55.574371, 37.6517\n\
+Stop Biryusinka: 55.581065, 37.64839\n\
+Stop Universam: 55.587655, 37.645687\n\
+Stop Biryulyovo Tovarnaya: 55.592028, 37.653656\n\
+Stop Biryulyovo Passazhirskaya: 55.580999, 37.659164\n\
+Bus 828: Biryulyovo Zapadnoye > Universam > Rossoshanskaya ulitsa > Biryulyovo Zapadnoye\n\
+Stop Rossoshanskaya ulitsa: 55.595579, 37.605757\n\
+Stop Prazhskaya: 55.611678, 37.603831\n\
+6\n\
+Bus 256\n\
+Bus 750\n\
+Bus 751\n\
+Stop Samara\n\
+Stop Prazhskaya\n\
+Stop Biryulyovo Zapadnoye\n\
+";
+    stringstream ssInput(sInput);
+
+    stringstream ssOutput;
+
+    DirectoryTransport directory;
+    const auto create_requests = ReadCreateRequests(ssInput);
+    const auto create_responses = ProcessCreateRequests(directory, create_requests);
+    const auto database_requests = ReadDatabaseRequests(ssInput);
+    const auto responses = ProcessDatabaseRequests(directory, database_requests);
+    PrintResponses(responses, ssOutput);
+
+    string sIdeal = "\
+Bus 256: 6 stops on route, 5 unique stops, 4371.26 route length\n\
+Bus 750: 5 stops on route, 3 unique stops, 20940 route length\n\
+Bus 751: not found\n\
+Stop Samara: not found\n\
+Stop Prazhskaya: no buses\n\
+Stop Biryulyovo Zapadnoye: buses 256 828\n\
+";
+    string sOutput = ssOutput.str();
+    ASSERT_EQUAL(sIdeal, sOutput);
+}
+
 int main() {
     try {
 #ifdef _MSC_VER
         TestRunner tr;
         RUN_TEST(tr, TestMain);
         RUN_TEST(tr, Test1);
+        RUN_TEST(tr, TestMain2);
 
         system("pause");
 #else
