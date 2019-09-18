@@ -1,3 +1,5 @@
+#include "test_runner.h"
+
 #include <iostream>
 #include <string>
 #include <string_view>
@@ -14,24 +16,24 @@ using namespace std;
 int ConvertToInt(string_view s) {
     size_t pos;
     const int result = stoi(string(s), &pos);
-    if (pos != s.length()) {
-        std::stringstream error;
-        error << "string " << s << " contains " << (s.length() - pos) << " trailing chars";
-        cerr << "string: " << s << endl;
-        cerr << error.str() << endl;
-        throw invalid_argument(error.str());
-    }
+    //if (pos != s.length()) {
+    //    std::stringstream error;
+    //    error << "string " << s << " contains " << (s.length() - pos) << " trailing chars";
+    //    cerr << "string: " << s << endl;
+    //    cerr << error.str() << endl;
+    //    throw invalid_argument(error.str());
+    //}
     return result;
 }
 
 double ConvertToDouble(string_view s) {
     size_t pos;
     const double result = stof(string(s), &pos);
-    if (pos != s.length()) {
-        std::stringstream error;
-        error << "string " << s << " contains " << (s.length() - pos) << " trailing chars";
-        throw invalid_argument(error.str());
-    }
+    //if (pos != s.length()) {
+    //    std::stringstream error;
+    //    error << "string " << s << " contains " << (s.length() - pos) << " trailing chars";
+    //    throw invalid_argument(error.str());
+    //}
     return result;
 }
 
@@ -56,16 +58,14 @@ string_view ReadToken(string_view& s, string_view delimiter = " ") {
     return lhs;
 }
 
-int ReadBusNumber(string_view& s) {
-    auto lhs = ReadToken(s, ": ");
-    int busNumber = ConvertToInt(lhs);
-    
-    return busNumber;
+string_view ReadBusNumber(string_view& s) {
+    auto lhs = ReadToken(s, ": "); 
+    return lhs;
 }
 
-int ReadDatabaseBusNumber(string_view& s) {
-    int busNumber = ConvertToInt(s);
-    return busNumber;
+string_view ReadDatabaseBusNumber(string_view& s) {
+    //int busNumber = ConvertToInt(s);
+    return s;
 }
 
 vector<string> ReadBusStops(string_view s) {
@@ -95,9 +95,9 @@ vector<string> ReadBusStops(string_view s) {
     return stops;
 }
 
-string ReadStopName(string_view& s) {
+string_view ReadStopName(string_view& s) {
     auto lhs = ReadToken(s, ": ");
-    return string(lhs);
+    return lhs;
 }
 
 double ReadLatitude(string_view& s) {
@@ -116,7 +116,7 @@ double ReadLongitude(string_view& s) {
 */
 
 struct BusInfo {
-    int busNumber;
+    string busNumber;
     int stopCount;
     int uniqueStopCount;
     double lengthRoute;
@@ -124,22 +124,22 @@ struct BusInfo {
 
 class DirectoryTransport {
 public:
-    void addBus(int number, const vector<string>& stops) {
-        buses[number] = stops;
+    void addBus(string_view number, const vector<string>& stops) {
+        buses[string(number)] = stops;
     }
 
-    void addStop(const string& name, double lat, double lon) {
-        stops[name] = {lat, lon};
+    void addStop(string_view name, double lat, double lon) {
+        stops[string(name)] = {lat, lon};
     }
 
-    BusInfo CalcBusInfo(int number) const {
-        if (!buses.count(number))
-            return {number,0,0,0};
+    BusInfo CalcBusInfo(string_view number) const {
+        if (!buses.count(string(number)))
+            return {string(number),0,0,0};
 
-        if (busesInfoCache.count(number))
-            return busesInfoCache.at(number);
+        if (busesInfoCache.count(string(number)))
+            return busesInfoCache.at(string(number));
 
-        const auto& busStops = buses.at(number);
+        const auto& busStops = buses.at(string(number));
 
         BusInfo info;
         info.busNumber = number;
@@ -147,7 +147,7 @@ public:
         info.uniqueStopCount = calcUniqueStopCount(busStops);
         info.lengthRoute = calcRouteLength(busStops);
 
-        busesInfoCache[number] = info;
+        busesInfoCache[string(number)] = info;
 
         return info;
     }
@@ -200,9 +200,9 @@ private:
     }
 
 private:
-    unordered_map<int, vector<string>> buses;
+    unordered_map<string, vector<string>> buses;
     unordered_map<string, pair<double, double>> stops;
-    mutable unordered_map<int, BusInfo> busesInfoCache;
+    mutable unordered_map<string, BusInfo> busesInfoCache;
 };
 
 //struct Request {
@@ -266,15 +266,22 @@ struct ComputeBusCreateRequest : ModifyRequest {
     ComputeBusCreateRequest() : ModifyRequest(Type::BUS) {}
 
     void ParseForm(string_view input) override {
-        number = ReadBusNumber(input);
-        stops = move(ReadBusStops(input));
+        string_view tmp = input;
+        try{
+            number = ReadBusNumber(input);
+            stops = move(ReadBusStops(input));
+        }
+        catch (...) {
+            cerr << "Exception: BusCreate is failed. string = [" << tmp << "]" << endl;
+            throw;
+        }
     }
 
     void Process(DirectoryTransport& directory) const override {
         directory.addBus(number, stops);
     }
 
-    int number = 0;
+    string number;
     vector<string> stops;
 };
 
@@ -282,16 +289,22 @@ struct ComputeStopCreateRequest : ModifyRequest {
     ComputeStopCreateRequest() : ModifyRequest(Type::STOP) {}
 
     void ParseForm(string_view input) override {
-        name = ReadStopName(input);
-        latitude = ReadLatitude(input);
-        longitude = ReadLongitude(input);
+        try{
+            name = ReadStopName(input);
+            latitude = ReadLatitude(input);
+            longitude = ReadLongitude(input);
+        }
+        catch (...) {
+            cerr << "Exception: StopCreate is failed" << endl;
+            throw;
+        }
     }
 
     void Process(DirectoryTransport& directory) const override {
         directory.addStop(name, latitude, longitude);
     }
 
-    string name = "";
+    string name;
     double latitude = 0;
     double longitude = 0;
 };
@@ -443,14 +456,20 @@ struct ComputeBusDatabaseRequest : ReadDatabaseRequest<BusInfo> {
     ComputeBusDatabaseRequest() : ReadDatabaseRequest<BusInfo>(Type::BUS) {}
 
     void ParseForm(string_view input) override {
-        number = ReadDatabaseBusNumber(input);
+        try {
+            number = ReadDatabaseBusNumber(input);
+        }
+        catch (...) {
+            cerr << "Exception: ReadDatabaseBusNumber is failed" << endl;
+            throw;
+        }
     }
 
     BusInfo Process(DirectoryTransport& directory) const override {
         return directory.CalcBusInfo(number);
     }
 
-    int number = 0;
+    string number;
 };
 
 DatabaseRequestHolder DatabaseRequest::Create(DatabaseRequest::Type type) {
@@ -548,14 +567,91 @@ void PrintResponses(const vector<BusInfo>& responses, ostream& stream = cout) {
     }
 }
 
+void TestMain() {
+    string sInput = "\
+10\n\
+Stop Tolstopaltsevo: 55.611087, 37.20829\n\
+Stop Marushkino: 55.595884, 37.209755\n\
+Bus 256: Biryulyovo Zapadnoye > Biryusinka > Universam > Biryulyovo Tovarnaya > Biryulyovo Passazhirskaya > Biryulyovo Zapadnoye\n\
+Bus 750: Tolstopaltsevo - Marushkino - Rasskazovka\n\
+Stop Rasskazovka: 55.632761, 37.333324\n\
+Stop Biryulyovo Zapadnoye: 55.574371, 37.6517\n\
+Stop Biryusinka: 55.581065, 37.64839\n\
+Stop Universam: 55.587655, 37.645687\n\
+Stop Biryulyovo Tovarnaya: 55.592028, 37.653656\n\
+Stop Biryulyovo Passazhirskaya: 55.580999, 37.659164\n\
+3\n\
+Bus 256\n\
+Bus 750\n\
+Bus 751\n\
+";
+    stringstream ssInput(sInput);
+
+    stringstream ssOutput;
+
+    DirectoryTransport directory;
+    const auto create_requests = ReadCreateRequests(ssInput);
+    const auto create_responses = ProcessCreateRequests(directory, create_requests);
+    const auto database_requests = ReadDatabaseRequests(ssInput);
+    const auto responses = ProcessDatabaseRequests(directory, database_requests);
+    PrintResponses(responses, ssOutput);
+
+    string sIdeal = "\
+Bus 256: 6 stops on route, 5 unique stops, 4371.26 route length\n\
+Bus 750: 5 stops on route, 3 unique stops, 20940 route length\n\
+Bus 751: not found\n\
+";
+    string sOutput = ssOutput.str();
+    ASSERT_EQUAL(sIdeal, sOutput);
+}
+
+void Test1() {
+    string sInput = "\
+3\n\
+Stop Tolstopaltsevo: 55.611087, 37.20829\n\
+Stop Marushkino: 55.595884, 37.209755\n\
+Bus 750: Tolstopaltsevo > Marushkino\n\
+1\n\
+Bus 750\n\
+";
+    stringstream ssInput(sInput);
+
+    stringstream ssOutput;
+
+    DirectoryTransport directory;
+    const auto create_requests = ReadCreateRequests(ssInput);
+    const auto create_responses = ProcessCreateRequests(directory, create_requests);
+    const auto database_requests = ReadDatabaseRequests(ssInput);
+    const auto responses = ProcessDatabaseRequests(directory, database_requests);
+    PrintResponses(responses, ssOutput);
+
+    string sIdeal = "\
+Bus 750: 2 stops on route, 2 unique stops, 1693.26 route length\n\
+";
+    ASSERT_EQUAL(sIdeal, ssOutput.str());
+}
 
 int main() {
-    DirectoryTransport directory;
-    const auto create_requests = ReadCreateRequests();
-    const auto create_responses = ProcessCreateRequests(directory, create_requests);
-    const auto database_requests = ReadDatabaseRequests();
-    const auto responses = ProcessDatabaseRequests(directory, database_requests);
-    PrintResponses(responses);
+    try {
+#ifdef _MSC_VER
+        TestRunner tr;
+        RUN_TEST(tr, TestMain);
+        RUN_TEST(tr, Test1);
+
+        system("pause");
+#else
+        DirectoryTransport directory;
+        const auto create_requests = ReadCreateRequests();
+        const auto create_responses = ProcessCreateRequests(directory, create_requests);
+        const auto database_requests = ReadDatabaseRequests();
+        const auto responses = ProcessDatabaseRequests(directory, database_requests);
+        PrintResponses(responses);
+#endif
+    }
+    catch (exception& e) {
+        cerr << "main catch: " << e.what() << endl;
+        //throw;
+    }
 
 #ifdef _MSC_VER
 	system("pause");
