@@ -107,8 +107,23 @@ double ReadLatitude(string_view& s) {
 }
 
 double ReadLongitude(string_view& s) {
-    double value = ConvertToDouble(s);
+    double value = ConvertToDouble(ReadToken(s));
     return value;
+}
+
+pair<string_view, int> ReadDistToStop(string_view s) {
+	auto dist = ReadToken(s, "m to ");
+	auto stop = s;
+	return { s, stoi(string(dist))};
+}
+
+vector<pair<string, int>> ReadDistanceToStops(string_view& s) {
+	vector<pair<string, int>> distToStops;
+	while (!s.empty()) {
+		auto lhs = ReadToken(s, ", ");
+		distToStops.emplace_back(ReadDistToStop(lhs));
+	}
+	return distToStops;
 }
 
 /*
@@ -120,6 +135,7 @@ struct BusInfo {
     int stopCount;
     int uniqueStopCount;
     double lengthRoute;
+	double curvature;
 };
 
 class DirectoryTransport {
@@ -131,9 +147,22 @@ public:
         }
     }
 
-    void addStop(string_view name, double lat, double lon) {
+    void addStop(string_view name, double lat, double lon, const vector<pair<string, int>>& distToStop) {
         stops[string(name)] = {lat, lon};
         stopBuses[name];
+
+		for (auto it = distToStop.begin(); it != distToStop.end(); ++it) {
+			distanceBetweenStops[name][it->first] = it->second;
+			
+			if (distanceBetweenStops.count(it->first) != 0) {
+				if (distanceBetweenStops[it->first].count(name) == 0) {
+					distanceBetweenStops[it->first][name] = it->second;
+				}
+			}
+			else {
+				distanceBetweenStops[it->first][name] = it->second;
+			}
+		}
     }
 
     BusInfo CalcBusInfo(string_view number) const {
@@ -150,6 +179,7 @@ public:
         info.stopCount = calcStopCount(busStops);
         info.uniqueStopCount = calcUniqueStopCount(busStops);
         info.lengthRoute = calcRouteLength(busStops);
+		info.curvature = info.lengthRoute / calcRouteLengthGeo(busStops);
 
         busesInfoCache[string(number)] = info;
 
@@ -183,11 +213,8 @@ private:
         double totalLength = 0;
 
         while (itSecond != stops_.end()) {
-            const auto[lat1, lon1] = stops.at(*itFirst);
-            const auto[lat2, lon2] = stops.at(*itSecond);
-            double dist = distance( gradToRad(lat1), gradToRad(lon1),
-                                    gradToRad(lat2), gradToRad(lon2));
-            totalLength += dist;
+			double dist = distanceBetweenStops.at(*itFirst).at(*itSecond);
+			totalLength += dist;
 
             itFirst = itSecond;
             if (++itSecond == stops_.end()) {
@@ -197,6 +224,35 @@ private:
 
         return totalLength;
     }
+
+	double calcRouteLengthGeo(const vector<string>& stops_) const {
+		if (stops_.size() < 2)
+			return 0;
+
+		auto itFirst = stops_.begin();
+		auto itSecond = next(itFirst);
+
+		double totalLength = 0;
+
+		while (itSecond != stops_.end()) {
+			const auto[lat1, lon1] = stops.at(*itFirst);
+			const auto[lat2, lon2] = stops.at(*itSecond);
+			double dist = distance(gradToRad(lat1), gradToRad(lon1),
+				gradToRad(lat2), gradToRad(lon2));
+			totalLength += dist;
+
+			itFirst = itSecond;
+			if (++itSecond == stops_.end()) {
+				break;
+			}
+		}
+
+		return totalLength;
+	}
+
+	double curvatureRoute(double realDist, double geoDist) {
+		return realDist / geoDist;
+	}
 
     double gradToRad(double grad) const {
         const double pi = 3.1415926535;
@@ -215,6 +271,7 @@ private:
     unordered_map<string, pair<double, double>> stops;
     unordered_map<string_view, set<string_view>> stopBuses;
     mutable unordered_map<string, BusInfo> busesInfoCache;
+    unordered_map<string_view, unordered_map<string_view, int>> distanceBetweenStops;
 };
 
 //struct Request {
@@ -305,6 +362,7 @@ struct ComputeStopCreateRequest : ModifyRequest {
             name = ReadStopName(input);
             latitude = ReadLatitude(input);
             longitude = ReadLongitude(input);
+			distToStops = ReadDistanceToStops(input);
         }
         catch (...) {
             cerr << "Exception: StopCreate is failed" << endl;
@@ -313,12 +371,13 @@ struct ComputeStopCreateRequest : ModifyRequest {
     }
 
     void Process(DirectoryTransport& directory) const override {
-        directory.addStop(name, latitude, longitude);
+        directory.addStop(name, latitude, longitude, distToStops);
     }
 
     string name;
     double latitude = 0;
     double longitude = 0;
+	vector<pair<string, int>> distToStops;
 };
 
 //struct BusInfo {
@@ -489,7 +548,8 @@ struct ComputeBusDatabaseRequest : ReadDatabaseRequest<string> {
             stream << "Bus " << info.busNumber << ": "
                 << info.stopCount << " stops on route, "
                 << info.uniqueStopCount << " unique stops, "
-                << setprecision(6) << info.lengthRoute << " route length" << endl;
+                << setprecision(6) << info.lengthRoute << " route length, " 
+				<< setprecision(6) << info.curvature << " curvature" << endl;
         }
         return stream.str();
     }
@@ -746,15 +806,63 @@ Stop Biryulyovo Zapadnoye: buses 256 828\n\
     ASSERT_EQUAL(sIdeal, sOutput);
 }
 
+void TestMain3() {
+	string sInput = "\
+13\n\
+Stop Tolstopaltsevo: 55.611087, 37.20829, 3900m to Marushkino\n\
+Stop Marushkino: 55.595884, 37.209755, 9900m to Rasskazovka\n\
+Bus 256: Biryulyovo Zapadnoye > Biryusinka > Universam > Biryulyovo Tovarnaya > Biryulyovo Passazhirskaya > Biryulyovo Zapadnoye\n\
+Bus 750: Tolstopaltsevo - Marushkino - Rasskazovka\n\
+Stop Rasskazovka: 55.632761, 37.333324\n\
+Stop Biryulyovo Zapadnoye: 55.574371, 37.6517, 7500m to Rossoshanskaya ulitsa, 1800m to Biryusinka, 2400m to Universam\n\
+Stop Biryusinka: 55.581065, 37.64839, 750m to Universam\n\
+Stop Universam: 55.587655, 37.645687, 5600m to Rossoshanskaya ulitsa, 900m to Biryulyovo Tovarnaya\n\
+Stop Biryulyovo Tovarnaya: 55.592028, 37.653656, 1300m to Biryulyovo Passazhirskaya\n\
+Stop Biryulyovo Passazhirskaya: 55.580999, 37.659164, 1200m to Biryulyovo Zapadnoye\n\
+Bus 828: Biryulyovo Zapadnoye > Universam > Rossoshanskaya ulitsa > Biryulyovo Zapadnoye\n\
+Stop Rossoshanskaya ulitsa: 55.595579, 37.605757\n\
+Stop Prazhskaya: 55.611678, 37.603831\n\
+6\n\
+Bus 256\n\
+Bus 750\n\
+Bus 751\n\
+Stop Samara\n\
+Stop Prazhskaya\n\
+Stop Biryulyovo Zapadnoye\n\
+";
+	stringstream ssInput(sInput);
+
+	stringstream ssOutput;
+
+	DirectoryTransport directory;
+	const auto create_requests = ReadCreateRequests(ssInput);
+	const auto create_responses = ProcessCreateRequests(directory, create_requests);
+	const auto database_requests = ReadDatabaseRequests(ssInput);
+	const auto responses = ProcessDatabaseRequests(directory, database_requests);
+	PrintResponses(responses, ssOutput);
+
+	string sIdeal = "\
+Bus 256: 6 stops on route, 5 unique stops, 5950 route length, 1.361239 curvature\n\
+Bus 750: 5 stops on route, 3 unique stops, 27600 route length, 1.318084 curvature\n\
+Bus 751: not found\n\
+Stop Samara: not found\n\
+Stop Prazhskaya: no buses\n\
+Stop Biryulyovo Zapadnoye: buses 256 828\n\
+";
+	string sOutput = ssOutput.str();
+	ASSERT_EQUAL(sIdeal, sOutput);
+}
+
 int main() {
     try {
 #ifdef _MSC_VER
         TestRunner tr;
-        RUN_TEST(tr, TestMain);
+        //RUN_TEST(tr, TestMain);
         RUN_TEST(tr, Test1);
-        RUN_TEST(tr, TestMain2);
+		//RUN_TEST(tr, TestMain2);
+		RUN_TEST(tr, TestMain3);
 
-        system("pause");
+        //system("pause");
 #else
         DirectoryTransport directory;
         const auto create_requests = ReadCreateRequests();
