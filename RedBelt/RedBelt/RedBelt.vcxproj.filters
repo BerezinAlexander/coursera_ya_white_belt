@@ -18,8 +18,16 @@
     <ClCompile Include="..\..\upgrate\upgrate\main.cpp">
       <Filter>Исходные файлы</Filter>
     </ClCompile>
-    <ClCompile Include="main_slow.cpp">
+    <ClCompile Include="..\..\upgrate\upgrate\json.cpp">
       <Filter>Исходные файлы</Filter>
     </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\..\upgrate\upgrate\test_runner.h">
+      <Filter>Файлы заголовков</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\upgrate\upgrate\json.h">
+      <Filter>Файлы заголовков</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

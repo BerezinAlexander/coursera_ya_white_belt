@@ -1,4 +1,6 @@
+#ifdef _MSC_VER
 #include "test_runner.h"
+#endif
 
 #include <iostream>
 #include <string>
@@ -10,6 +12,9 @@
 #include <math.h>
 #include <iomanip>
 #include <vector>
+#include <fstream>
+
+#include "json.h"
 
 using namespace std;
 
@@ -152,15 +157,15 @@ public:
         stopBuses[name];
 
 		for (auto it = distToStop.begin(); it != distToStop.end(); ++it) {
-			distanceBetweenStops[name][it->first] = it->second;
+			distanceBetweenStops[string(name)][it->first] = it->second;
 			
 			if (distanceBetweenStops.count(it->first) != 0) {
-				if (distanceBetweenStops[it->first].count(name) == 0) {
-					distanceBetweenStops[it->first][name] = it->second;
+				if (distanceBetweenStops[it->first].count(string(name)) == 0) {
+					distanceBetweenStops[it->first][string(name)] = it->second;
 				}
 			}
 			else {
-				distanceBetweenStops[it->first][name] = it->second;
+				distanceBetweenStops[it->first][string(name)] = it->second;
 			}
 		}
     }
@@ -271,7 +276,7 @@ private:
     unordered_map<string, pair<double, double>> stops;
     unordered_map<string_view, set<string_view>> stopBuses;
     mutable unordered_map<string, BusInfo> busesInfoCache;
-    unordered_map<string_view, unordered_map<string_view, int>> distanceBetweenStops;
+    unordered_map<string, unordered_map<string, int>> distanceBetweenStops;
 };
 
 //struct Request {
@@ -295,7 +300,7 @@ struct CreateRequest {
 
     CreateRequest(Type type) : type(type) {}
     static CreateRequestHolder Create(Type type);
-    virtual void ParseForm(string_view input) = 0;
+    virtual void ParseForm(const Json::Node& input) = 0;
     virtual ~CreateRequest() = default;
 
     const Type type;
@@ -334,41 +339,43 @@ struct ModifyRequest : CreateRequest {
 struct ComputeBusCreateRequest : ModifyRequest {
     ComputeBusCreateRequest() : ModifyRequest(Type::BUS) {}
 
-    void ParseForm(string_view input) override {
-        string_view tmp = input;
-        try{
-            number = ReadBusNumber(input);
-            stops = move(ReadBusStops(input));
-        }
-        catch (...) {
-            cerr << "Exception: BusCreate is failed. string = [" << tmp << "]" << endl;
-            throw;
-        }
+    void ParseForm(const Json::Node& input) override {
+		const map<string, Json::Node>& m = input.AsMap();
+		name = m.at("name").AsString();
+
+		for (const auto& stop : m.at("stops").AsArray()) {
+			stops.emplace_back(stop.AsString());
+		}
+
+		bool isRoundTrip = static_cast<bool>(m.at("is_roundtrip").AsBool());
+		if (!isRoundTrip) {
+			for (int i = stops.size() - 2; i >= 0; --i) {
+				stops.emplace_back(stops[i]);
+			}
+		}
     }
 
     void Process(DirectoryTransport& directory) const override {
-        directory.addBus(number, stops);
+        directory.addBus(name, stops);
     }
 
-    string number;
+    string name;
     vector<string> stops;
 };
 
 struct ComputeStopCreateRequest : ModifyRequest {
     ComputeStopCreateRequest() : ModifyRequest(Type::STOP) {}
 
-    void ParseForm(string_view input) override {
-        try{
-            name = ReadStopName(input);
-            latitude = ReadLatitude(input);
-            longitude = ReadLongitude(input);
-			distToStops = ReadDistanceToStops(input);
-        }
-        catch (...) {
-            cerr << "Exception: StopCreate is failed" << endl;
-            throw;
-        }
-    }
+	void ParseForm(const Json::Node& input) override {
+		const map<string, Json::Node>& m = input.AsMap();
+		name = m.at("name").AsString();
+		latitude = m.at("latitude").AsDouble();
+		longitude = m.at("longitude").AsDouble();
+
+		for (const auto&[stop, dist] : m.at("road_distances").AsMap()) {
+			distToStops.emplace_back(stop, dist.AsInt());
+		}
+	}
 
     void Process(DirectoryTransport& directory) const override {
         directory.addStop(name, latitude, longitude, distToStops);
@@ -434,28 +441,28 @@ optional<CreateRequest::Type> ConvertCreateRequestTypeFromString(string_view typ
     }
 }
 
-CreateRequestHolder ParseCreateRequest(string_view request_str) {
-    const auto request_type = ConvertCreateRequestTypeFromString(ReadToken(request_str));
+CreateRequestHolder ParseCreateRequest(const Json::Node& node_) {
+	const map<string, Json::Node>& node = node_.AsMap();
+    const auto request_type = ConvertCreateRequestTypeFromString(node.at("type").AsString());
     if (!request_type) {
         return nullptr;
     }
     CreateRequestHolder request = CreateRequest::Create(*request_type);
     if (request) {
-        request->ParseForm(request_str);
+        request->ParseForm(node);
     };
     return request;
 }
 
-vector<CreateRequestHolder> ReadCreateRequests(istream& in_stream = cin) {
-    const size_t request_count = ReadNumberOnLine<size_t>(in_stream);
+vector<CreateRequestHolder> ReadCreateRequests(const Json::Node& node_) {
+	const vector<Json::Node> nodeRequests = node_.AsArray();
+    const size_t request_count = nodeRequests.size();
 
     vector<CreateRequestHolder> requests;
     requests.reserve(request_count);
 
-    for (size_t i = 0; i < request_count; ++i) {
-        string request_str;
-        getline(in_stream, request_str);
-        if (auto request = ParseCreateRequest(request_str)) {
+    for (const auto& node : nodeRequests) {
+        if (auto request = ParseCreateRequest(node)) {
             requests.push_back(move(request));
         }
     }
@@ -502,7 +509,7 @@ struct DatabaseRequest {
 
     DatabaseRequest(Type type) : type(type) {}
     static DatabaseRequestHolder Create(Type type);
-    virtual void ParseForm(string_view input) = 0;
+	virtual void ParseForm(const Json::Node& input) = 0;
     virtual ~DatabaseRequest() = default;
 
     const Type type;
@@ -528,68 +535,80 @@ struct ReadDatabaseRequest : DatabaseRequest {
 struct ComputeBusDatabaseRequest : ReadDatabaseRequest<string> {
     ComputeBusDatabaseRequest() : ReadDatabaseRequest<string>(Type::BUS) {}
 
-    void ParseForm(string_view input) override {
-        try {
-            number = ReadDatabaseBusNumber(input);
-        }
-        catch (...) {
-            cerr << "Exception: ReadDatabaseBusNumber is failed" << endl;
-            throw;
-        }
-    }
+	void ParseForm(const Json::Node& input) override {
+		const map<string, Json::Node>& m = input.AsMap();
+		name = m.at("name").AsString();
+		id = m.at("id").AsInt();
+	}
 
     string Process(DirectoryTransport& directory) const override {
-        BusInfo info = directory.CalcBusInfo(number);
+        BusInfo info = directory.CalcBusInfo(name);
         stringstream stream;
+
         if (info.stopCount == 0) {
-            stream << "Bus " << info.busNumber << ": not found" << endl;
+			stream << "{";
+			stream << "\"request_id\": " << id << ", ";
+			stream << "\"error_message\": \"not found\"";
+			stream << "}";
         }
         else {
-            stream << "Bus " << info.busNumber << ": "
-                << info.stopCount << " stops on route, "
-                << info.uniqueStopCount << " unique stops, "
-                << setprecision(6) << info.lengthRoute << " route length, " 
-				<< setprecision(6) << info.curvature << " curvature" << endl;
+			stream << "{";
+			stream << "\"request_id\": " << id << ", ";
+			stream << "\"stop_count\": " << info.stopCount << ", ";
+			stream << "\"unique_stop_count\": " << info.uniqueStopCount << ", ";
+			stream << "\"route_length\": " << info.lengthRoute << ", ";
+			stream << "\"curvature\": " << info.curvature;
+			stream << "}";
         }
         return stream.str();
     }
 
-    string number;
+	int id;
+    string name;
 };
 
 struct ComputeStopDatabaseRequest : ReadDatabaseRequest<string> {
     ComputeStopDatabaseRequest() : ReadDatabaseRequest<string>(Type::STOP) {}
 
-    void ParseForm(string_view input) override {
-        try {
-            name = ReadDatabaseBusNumber(input);
-        }
-        catch (...) {
-            cerr << "Exception: ReadDatabaseBusNumber is failed" << endl;
-            throw;
-        }
-    }
+	void ParseForm(const Json::Node& input) override {
+		const map<string, Json::Node>& m = input.AsMap();
+		name = m.at("name").AsString();
+		id = m.at("id").AsInt();
+	}
 
     string Process(DirectoryTransport& directory) const override {
         auto[isFound, buses] = directory.CalcStopInfo(name);
         stringstream stream;
-        if (!isFound) {
-            stream << "Stop " << name << ": not found" << endl;
+		stream << "{";
+		stream << "\"request_id\": " << id << ", ";
+        
+		if (!isFound) {
+			stream << "\"error_message\": \"not found\"";
         }
         else if (buses.empty()) {
-            stream << "Stop " << name << ": no buses" << endl;
+			stream << "\"buses\": []";
         }
         else {
-            stream << "Stop " << name << ": buses";
-            for (auto& bus : buses) {
-                stream << " " << bus;
-            }
-            stream << endl;
+			stream << "\"buses\": [";
+			bool first = true;
+			for (auto& bus : buses) {
+				if (first) {
+					stream << "\"" << bus << "\"";
+					first = false;
+				}
+				else {
+					stream << ", ";
+					stream << "\"" << bus << "\"";
+				}
+			}
+			stream << "]";
         }
+		stream << "}";
 
         return stream.str();
     }
 
+	int id;
     string name;
 };
 
@@ -627,31 +646,32 @@ optional<DatabaseRequest::Type> ConvertDatabaseRequestTypeFromString(string_view
     }
 }
 
-DatabaseRequestHolder ParseDatabaseRequest(string_view request_str) {
-    const auto request_type = ConvertDatabaseRequestTypeFromString(ReadToken(request_str));
+DatabaseRequestHolder ParseDatabaseRequest(const Json::Node& node_) {
+	const map<string, Json::Node>& node = node_.AsMap();
+    const auto request_type = ConvertDatabaseRequestTypeFromString(node.at("type").AsString());
     if (!request_type) {
         return nullptr;
     }
     DatabaseRequestHolder request = DatabaseRequest::Create(*request_type);
     if (request) {
-        request->ParseForm(request_str);
+        request->ParseForm(node);
     };
     return request;
 }
 
-vector<DatabaseRequestHolder> ReadDatabaseRequests(istream& in_stream = cin) {
-    const size_t request_count = ReadNumberOnLine<size_t>(in_stream);
+vector<DatabaseRequestHolder> ReadDatabaseRequests(const Json::Node& node_) {
+	const vector<Json::Node>& nodeRequests = node_.AsArray();
+    const size_t request_count = nodeRequests.size();
 
     vector<DatabaseRequestHolder> requests;
     requests.reserve(request_count);
 
-    for (size_t i = 0; i < request_count; ++i) {
-        string request_str;
-        getline(in_stream, request_str);
-        if (auto request = ParseDatabaseRequest(request_str)) {
-            requests.push_back(move(request));
-        }
-    }
+	for (const auto& node : nodeRequests) {
+		if (auto request = ParseDatabaseRequest(node)) {
+			requests.push_back(move(request));
+		}
+	}
+
     return requests;
 }
 
@@ -666,210 +686,101 @@ vector<string> ProcessDatabaseRequests(DirectoryTransport& directory, const vect
             const auto& request = dynamic_cast<const ComputeStopDatabaseRequest&>(*request_holder);
             responses.push_back(move(request.Process(directory)));
         }
-
-
-        //if (request_holder->type == Request::Type::COMPUTE_INCOME) {
-        //    const auto& request = static_cast<const ComputeIncomeRequest&>(*request_holder);
-        //    responses.push_back(request.Process(manager));
-        //}
-        //else {
-        //    const auto& request = static_cast<const ModifyRequest&>(*request_holder);
-        //    request.Process(manager);
-        //}
     }
     return responses;
 }
 
 void PrintResponses(const vector<string>& responses, ostream& stream = cout) {
-    for (const string& response : responses) {
-        stream << response;
-        //if (response.stopCount == 0) {
-        //    stream << "Bus " << response.busNumber << ": not found" << endl;
-        //}
-        //else {
-        //    stream << "Bus " << response.busNumber << ": "
-        //        << response.stopCount << " stops on route, "
-        //        << response.uniqueStopCount << " unique stops, "
-        //        << setprecision(6) << response.lengthRoute << " route length" << endl;
-        //}
+	stream << "[";
+	bool first = true;
+	for (const string& response : responses) {
+		if (first) {
+			stream << response;
+			first = false;
+		}
+		else {
+			stream << ", ";
+			stream << response;
+		}
     }
+	stream << "]";
 }
+
+#ifdef _MSC_VER
 
 void TestMain() {
-    string sInput = "\
-10\n\
-Stop Tolstopaltsevo: 55.611087, 37.20829\n\
-Stop Marushkino: 55.595884, 37.209755\n\
-Bus 256: Biryulyovo Zapadnoye > Biryusinka > Universam > Biryulyovo Tovarnaya > Biryulyovo Passazhirskaya > Biryulyovo Zapadnoye\n\
-Bus 750: Tolstopaltsevo - Marushkino - Rasskazovka\n\
-Stop Rasskazovka: 55.632761, 37.333324\n\
-Stop Biryulyovo Zapadnoye: 55.574371, 37.6517\n\
-Stop Biryusinka: 55.581065, 37.64839\n\
-Stop Universam: 55.587655, 37.645687\n\
-Stop Biryulyovo Tovarnaya: 55.592028, 37.653656\n\
-Stop Biryulyovo Passazhirskaya: 55.580999, 37.659164\n\
-3\n\
-Bus 256\n\
-Bus 750\n\
-Bus 751\n\
-";
-    stringstream ssInput(sInput);
+	stringstream ss2("{\"base_requests\": [{\"type\": \"Bus\", \"name\": \"256\", \"stops\": [\"Biryulyovo Zapadnoye\", \"Universam\", \"Biryulyovo Zapadnoye\"], \"is_roundtrip\": true}, {\"type\": \"Stop\", \"name\": \"Tolstopaltsevo\", \"latitude\": 55.611087, \"longitude\": 37.20829, \"road_distances\": {\"Marushkino\": 3900}}]}");
+	Json::Document doc2 = Json::Load(ss2);
+	
+	string sTmp;
+	string tmp1 = "";
+	while (getline(ss2, tmp1)) {
+		sTmp += tmp1;
+	}
 
-    stringstream ssOutput;
-
-    DirectoryTransport directory;
-    const auto create_requests = ReadCreateRequests(ssInput);
-    const auto create_responses = ProcessCreateRequests(directory, create_requests);
-    const auto database_requests = ReadDatabaseRequests(ssInput);
-    const auto responses = ProcessDatabaseRequests(directory, database_requests);
-    PrintResponses(responses, ssOutput);
-
-    string sIdeal = "\
-Bus 256: 6 stops on route, 5 unique stops, 4371.26 route length\n\
-Bus 750: 5 stops on route, 3 unique stops, 20940 route length\n\
-Bus 751: not found\n\
-";
-    string sOutput = ssOutput.str();
-    ASSERT_EQUAL(sIdeal, sOutput);
-}
-
-void Test1() {
-    string sInput = "\
-3\n\
-Stop Tolstopaltsevo: 55.611087, 37.20829\n\
-Stop Marushkino: 55.595884, 37.209755\n\
-Bus 750: Tolstopaltsevo > Marushkino\n\
-1\n\
-Bus 750\n\
-";
-    stringstream ssInput(sInput);
-
-    stringstream ssOutput;
-
-    DirectoryTransport directory;
-    const auto create_requests = ReadCreateRequests(ssInput);
-    const auto create_responses = ProcessCreateRequests(directory, create_requests);
-    const auto database_requests = ReadDatabaseRequests(ssInput);
-    const auto responses = ProcessDatabaseRequests(directory, database_requests);
-    PrintResponses(responses, ssOutput);
-
-    string sIdeal = "\
-Bus 750: 2 stops on route, 2 unique stops, 1693.26 route length\n\
-";
-    ASSERT_EQUAL(sIdeal, ssOutput.str());
-}
-
-void TestMain2() {
-    string sInput = "\
-13\n\
-Stop Tolstopaltsevo: 55.611087, 37.20829\n\
-Stop Marushkino: 55.595884, 37.209755\n\
-Bus 256: Biryulyovo Zapadnoye > Biryusinka > Universam > Biryulyovo Tovarnaya > Biryulyovo Passazhirskaya > Biryulyovo Zapadnoye\n\
-Bus 750: Tolstopaltsevo - Marushkino - Rasskazovka\n\
-Stop Rasskazovka: 55.632761, 37.333324\n\
-Stop Biryulyovo Zapadnoye: 55.574371, 37.6517\n\
-Stop Biryusinka: 55.581065, 37.64839\n\
-Stop Universam: 55.587655, 37.645687\n\
-Stop Biryulyovo Tovarnaya: 55.592028, 37.653656\n\
-Stop Biryulyovo Passazhirskaya: 55.580999, 37.659164\n\
-Bus 828: Biryulyovo Zapadnoye > Universam > Rossoshanskaya ulitsa > Biryulyovo Zapadnoye\n\
-Stop Rossoshanskaya ulitsa: 55.595579, 37.605757\n\
-Stop Prazhskaya: 55.611678, 37.603831\n\
-6\n\
-Bus 256\n\
-Bus 750\n\
-Bus 751\n\
-Stop Samara\n\
-Stop Prazhskaya\n\
-Stop Biryulyovo Zapadnoye\n\
-";
-    stringstream ssInput(sInput);
-
-    stringstream ssOutput;
-
-    DirectoryTransport directory;
-    const auto create_requests = ReadCreateRequests(ssInput);
-    const auto create_responses = ProcessCreateRequests(directory, create_requests);
-    const auto database_requests = ReadDatabaseRequests(ssInput);
-    const auto responses = ProcessDatabaseRequests(directory, database_requests);
-    PrintResponses(responses, ssOutput);
-
-    string sIdeal = "\
-Bus 256: 6 stops on route, 5 unique stops, 4371.26 route length\n\
-Bus 750: 5 stops on route, 3 unique stops, 20940 route length\n\
-Bus 751: not found\n\
-Stop Samara: not found\n\
-Stop Prazhskaya: no buses\n\
-Stop Biryulyovo Zapadnoye: buses 256 828\n\
-";
-    string sOutput = ssOutput.str();
-    ASSERT_EQUAL(sIdeal, sOutput);
-}
-
-void TestMain3() {
-	string sInput = "\
-13\n\
-Stop Tolstopaltsevo: 55.611087, 37.20829, 3900m to Marushkino\n\
-Stop Marushkino: 55.595884, 37.209755, 9900m to Rasskazovka\n\
-Bus 256: Biryulyovo Zapadnoye > Biryusinka > Universam > Biryulyovo Tovarnaya > Biryulyovo Passazhirskaya > Biryulyovo Zapadnoye\n\
-Bus 750: Tolstopaltsevo - Marushkino - Rasskazovka\n\
-Stop Rasskazovka: 55.632761, 37.333324\n\
-Stop Biryulyovo Zapadnoye: 55.574371, 37.6517, 7500m to Rossoshanskaya ulitsa, 1800m to Biryusinka, 2400m to Universam\n\
-Stop Biryusinka: 55.581065, 37.64839, 750m to Universam\n\
-Stop Universam: 55.587655, 37.645687, 5600m to Rossoshanskaya ulitsa, 900m to Biryulyovo Tovarnaya\n\
-Stop Biryulyovo Tovarnaya: 55.592028, 37.653656, 1300m to Biryulyovo Passazhirskaya\n\
-Stop Biryulyovo Passazhirskaya: 55.580999, 37.659164, 1200m to Biryulyovo Zapadnoye\n\
-Bus 828: Biryulyovo Zapadnoye > Universam > Rossoshanskaya ulitsa > Biryulyovo Zapadnoye\n\
-Stop Rossoshanskaya ulitsa: 55.595579, 37.605757\n\
-Stop Prazhskaya: 55.611678, 37.603831\n\
-6\n\
-Bus 256\n\
-Bus 750\n\
-Bus 751\n\
-Stop Samara\n\
-Stop Prazhskaya\n\
-Stop Biryulyovo Zapadnoye\n\
-";
-	stringstream ssInput(sInput);
+	
+	
+	fstream ssInput("input.txt");
+	if (!ssInput.is_open()) {
+		cout << "File input.txt is not open!" << endl;
+		return;
+	}
 
 	stringstream ssOutput;
 
-	DirectoryTransport directory;
-	const auto create_requests = ReadCreateRequests(ssInput);
-	const auto create_responses = ProcessCreateRequests(directory, create_requests);
-	const auto database_requests = ReadDatabaseRequests(ssInput);
-	const auto responses = ProcessDatabaseRequests(directory, database_requests);
-	PrintResponses(responses, ssOutput);
+	Json::Document doc = Json::Load(ssInput);
+	const map<string, Json::Node>& nodes = doc.GetRoot().AsMap();
 
-	string sIdeal = "\
-Bus 256: 6 stops on route, 5 unique stops, 5950 route length, 1.361239 curvature\n\
-Bus 750: 5 stops on route, 3 unique stops, 27600 route length, 1.318084 curvature\n\
-Bus 751: not found\n\
-Stop Samara: not found\n\
-Stop Prazhskaya: no buses\n\
-Stop Biryulyovo Zapadnoye: buses 256 828\n\
-";
+	DirectoryTransport directory;
+	if (nodes.count("base_requests")) {
+		const auto create_requests = ReadCreateRequests(nodes.at("base_requests"));
+		const auto create_responses = ProcessCreateRequests(directory, create_requests);
+	}
+	if (nodes.count("stat_requests")) {
+		const auto database_requests = ReadDatabaseRequests(nodes.at("stat_requests"));
+		const auto responses = ProcessDatabaseRequests(directory, database_requests);
+		PrintResponses(responses, ssOutput);
+	}
+
+	fstream ideal("ideal.txt");
+	if (!ssInput.is_open()) {
+		cout << "File ideal.txt is not open!" << endl;
+		return;
+	}
+
+	string sIdeal;
+	string tmp = "";
+	while (getline(ideal, tmp)) {
+		sIdeal += tmp;
+	}
+
 	string sOutput = ssOutput.str();
+
+	fstream outputFile("output.txt");
+	outputFile << sOutput;
+
 	ASSERT_EQUAL(sIdeal, sOutput);
 }
+#endif
 
 int main() {
     try {
 #ifdef _MSC_VER
         TestRunner tr;
-        //RUN_TEST(tr, TestMain);
-        RUN_TEST(tr, Test1);
-		//RUN_TEST(tr, TestMain2);
-		RUN_TEST(tr, TestMain3);
+        RUN_TEST(tr, TestMain);
 
         //system("pause");
 #else
-        DirectoryTransport directory;
-        const auto create_requests = ReadCreateRequests();
-        const auto create_responses = ProcessCreateRequests(directory, create_requests);
-        const auto database_requests = ReadDatabaseRequests();
-        const auto responses = ProcessDatabaseRequests(directory, database_requests);
-        PrintResponses(responses);
+
+		Json::Document doc = Json::Load(cin);
+		const map<string, Json::Node>& nodes = doc.GetRoot().AsMap();
+
+		DirectoryTransport directory;
+		const auto create_requests = ReadCreateRequests(nodes.at("base_requests"));
+		const auto create_responses = ProcessCreateRequests(directory, create_requests);
+		const auto database_requests = ReadDatabaseRequests(nodes.at("stat_requests"));
+		const auto responses = ProcessDatabaseRequests(directory, database_requests);
+		PrintResponses(responses);
 #endif
     }
     catch (exception& e) {
