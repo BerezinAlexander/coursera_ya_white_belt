@@ -1,0 +1,85 @@
+{
+  "routing_settings": {
+    "bus_wait_time": 6,
+    "bus_velocity": 40
+  },
+  "base_requests": [
+    {
+      "type": "Bus",
+      "name": "297",
+      "stops": [
+        "Biryulyovo",
+        "Universam",
+        "Stupino",
+        "Universam",
+        "Biryulyovo"
+      ],
+      "is_roundtrip": true
+    },
+    {
+      "type": "Stop",
+      "road_distances": {
+        "Biryulyovo": 2600
+      },
+      "longitude": 37.6517,
+      "name": "Universam",
+      "latitude": 55.574371
+    },
+    {
+      "type": "Stop",
+      "road_distances": {
+        "Universam": 2600
+      },
+      "longitude": 37.6417,
+      "name": "Biryulyovo",
+      "latitude": 55.573371
+    },
+    {
+      "type": "Stop",
+      "road_distances": {
+        "Universam": 3600
+      },
+      "longitude": 37.6517,
+      "name": "Stupino",
+      "latitude": 55.574371
+    },
+    {
+      "type": "Bus",
+      "name": "181",
+      "stops": [
+        "Brateevo",
+        "Universam",
+        "Skolkovo",
+        "Universam",
+        "Brateevo"
+      ],
+      "is_roundtrip": true
+    },
+    {
+      "type": "Stop",
+      "road_distances": {
+        "Universam": 2200
+      },
+      "longitude": 37.6617,
+      "name": "Brateevo",
+      "latitude": 55.575371
+    },
+    {
+      "type": "Stop",
+      "road_distances": {
+        "Universam": 3100
+      },
+      "longitude": 37.6617,
+      "name": "Skolkovo",
+      "latitude": 55.575371
+    }
+  ],
+  "stat_requests": [
+    {
+      "type": "Route",
+      "from": "Biryulyovo",
+      "to": "Skolkovo",
+      "id": 1
+    }
+  ]
+}

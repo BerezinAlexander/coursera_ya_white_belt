@@ -67,11 +67,20 @@ namespace Json {
 
   Node LoadBool(istream& input) {
 	  bool result = false;
-	  string str;
-	  getline(input, str, '}');
-	  if (str == "true")
+	  char c;
+	  input >> c;
+	  if (c == 't') {
+		  input.ignore(3);
 		  result = true;
-	  input.putback('}');
+	  }
+	  else {
+		  input.ignore(4);
+	  }
+	  //string str;
+	  //getline(input, str, '}');
+	  //if (str == "true")
+		 // result = true;
+	  //input.putback('}');
 	  return Node(result);
   }
 
