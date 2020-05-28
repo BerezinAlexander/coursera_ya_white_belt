@@ -1,28 +1,66 @@
-#include <array>
-#include <cassert>
-#include <cstdlib>
-#include <ctime>
+#ifdef _MSC_VER
+#include "test_runner.h"
+#endif
+
 #include <iostream>
+#include <string>
+#include <string_view>
+#include <unordered_map>
 #include <optional>
 #include <sstream>
-#include <stdexcept>
-#include <string_view>
-#include <utility>
+#include <set>
+#include <math.h>
+#include <iomanip>
+#include <vector>
+#include <fstream>
+
+#include "json.h"
+#include "graph.h"
+#include "router.h"
+
+#include "DirectoryTransport.h"
+#include "Request.h"
+#include "RequestCreate.h"
+#include "RequestDatabase.h"
 
 using namespace std;
 
-pair<string_view, optional<string_view>> SplitTwoStrict(string_view s, string_view delimiter = " ") {
-    const size_t pos = s.find(delimiter);
+int ConvertToInt(string_view s) {
+    size_t pos;
+    const int result = stoi(string(s), &pos);
+    //if (pos != s.length()) {
+    //    std::stringstream error;
+    //    error << "string " << s << " contains " << (s.length() - pos) << " trailing chars";
+    //    cerr << "string: " << s << endl;
+    //    cerr << error.str() << endl;
+    //    throw invalid_argument(error.str());
+    //}
+    return result;
+}
+
+double ConvertToDouble(string_view s) {
+    size_t pos;
+    const double result = stof(string(s), &pos);
+    //if (pos != s.length()) {
+    //    std::stringstream error;
+    //    error << "string " << s << " contains " << (s.length() - pos) << " trailing chars";
+    //    throw invalid_argument(error.str());
+    //}
+    return result;
+}
+
+pair<string_view, optional<string_view>> SplitToStrict(string_view s, string_view delimeter = " ") {
+    const size_t pos = s.find(delimeter);
     if (pos == s.npos) {
         return { s, nullopt };
     }
     else {
-        return { s.substr(0, pos), s.substr(pos + delimiter.length()) };
+        return { s.substr(0, pos), s.substr(pos + delimeter.length()) };
     }
 }
 
-pair<string_view, string_view> SplitTwo(string_view s, string_view delimiter = " ") {
-    const auto[lhs, rhs_opt] = SplitTwoStrict(s, delimiter);
+pair<string_view, string_view> SplitTwo(string_view s, string_view delimeter = " ") {
+    const auto[lhs, rhs_opt] = SplitToStrict(s, delimeter);
     return { lhs, rhs_opt.value_or("") };
 }
 
@@ -32,216 +70,298 @@ string_view ReadToken(string_view& s, string_view delimiter = " ") {
     return lhs;
 }
 
-int ConvertToInt(string_view str) {
-    // use std::from_chars when available to git rid of string copy
-    size_t pos;
-    const int result = stoi(string(str), &pos);
-    if (pos != str.length()) {
-        std::stringstream error;
-        error << "string " << str << " contains " << (str.length() - pos) << " trailing chars";
-        throw invalid_argument(error.str());
-    }
-    return result;
+string_view ReadBusNumber(string_view& s) {
+    auto lhs = ReadToken(s, ": "); 
+    return lhs;
 }
 
-template <typename Number>
-void ValidateBounds(Number number_to_check, Number min_value, Number max_value) {
-    if (number_to_check < min_value || number_to_check > max_value) {
-        std::stringstream error;
-        error << number_to_check << " is out of [" << min_value << ", " << max_value << "]";
-        throw out_of_range(error.str());
-    }
+string_view ReadDatabaseBusNumber(string_view& s) {
+    //int busNumber = ConvertToInt(s);
+    return s;
 }
 
-class Date {
-public:
-    static Date FromString(string_view str) {
-        const int year = ConvertToInt(ReadToken(str, "-"));
-        const int month = ConvertToInt(ReadToken(str, "-"));
-        ValidateBounds(month, 1, 12);
-        const int day = ConvertToInt(str);
-        ValidateBounds(day, 1, 31);
-        return { year, month, day };
+vector<string> ReadBusStops(string_view s) {
+    bool loop = false;
+    string delimeter = " - ";
+    size_t pos = s.find("-");
+    if (pos == s.npos) {
+        loop = true;
+        delimeter = " > ";
     }
 
-    // Weird legacy, can't wait for std::chrono::year_month_day
-    time_t AsTimestamp() const {
-        std::tm t{
-          .tm_sec = 0,
-          .tm_min = 0,
-          .tm_hour = 0,
-          .tm_mday = day_,
-          .tm_mon = month_ - 1,
-          .tm_year = year_ - 1900,
-          .tm_isdst = 0,
-        };
-        return mktime(&t);
+    vector<string> stops;
+    stops.reserve(100);
+    while (true) {
+        string_view lhs = ReadToken(s, delimeter);
+        stops.emplace_back(lhs);
+        if (s.empty())
+            break;
     }
 
-private:
-    int year_;
-    int month_;
-    int day_;
-
-    Date(int year, int month, int day)
-        : year_(year), month_(month), day_(day)
-    {}
-};
-
-int ComputeDaysDiff(const Date& date_to, const Date& date_from) {
-    const time_t timestamp_to = date_to.AsTimestamp();
-    const time_t timestamp_from = date_from.AsTimestamp();
-    static constexpr int SECONDS_IN_DAY = 60 * 60 * 24;
-    return (timestamp_to - timestamp_from) / SECONDS_IN_DAY;
-}
-
-static const Date START_DATE = Date::FromString("2000-01-01");
-static const Date END_DATE = Date::FromString("2100-01-01");
-static const size_t DAY_COUNT = ComputeDaysDiff(END_DATE, START_DATE);
-static const size_t DAY_COUNT_P2 = 1 << 16;
-static const size_t VERTEX_COUNT = DAY_COUNT_P2 * 2;
-
-size_t ComputeDayIndex(const Date& date) {
-    return ComputeDaysDiff(date, START_DATE);
-}
-
-struct MoneyState {
-    double earned = 0.0;
-    double spent = 0.0;
-
-    double ComputeIncome() const {
-        return earned - spent;
-    }
-
-    MoneyState& operator+=(const MoneyState& other) {
-        earned += other.earned;
-        spent += other.spent;
-        return *this;
-    }
-    MoneyState operator+(const MoneyState& other) const {
-        return MoneyState(*this) += other;
-    }
-
-    MoneyState operator*=(double factor) {
-        earned *= factor;
-        spent *= factor;
-        return *this;
-    }
-    MoneyState operator*(double factor) const {
-        return MoneyState(*this) *= factor;
-    }
-};
-
-
-array<MoneyState, VERTEX_COUNT> tree_values, tree_add;
-array<double, VERTEX_COUNT> tree_factor;
-
-void Init() {
-    tree_values.fill({});
-    tree_add.fill({});
-    tree_factor.fill(1);
-}
-
-void Push(size_t v, size_t l, size_t r) {
-    for (size_t w = v * 2; w <= v * 2 + 1; ++w) {
-        if (w < VERTEX_COUNT) {
-            tree_factor[w] *= tree_factor[v];
-            tree_add[w].earned *= tree_factor[v];
-            tree_add[w] += tree_add[v];
-            tree_values[w].earned *= tree_factor[v];
-            tree_values[w] += tree_add[v] * ((r - l) / 2);
+    if (!loop) {
+        for (int i = stops.size() - 2; i >= 0; --i) {
+            stops.emplace_back(stops[i]);
         }
     }
-    tree_factor[v] = 1;
-    tree_add[v] = {};
+    
+    return stops;
 }
 
-MoneyState ComputeSum(size_t v, size_t l, size_t r, size_t ql, size_t qr) {
-    if (v >= VERTEX_COUNT || qr <= l || r <= ql) {
-        return {};
-    }
-    Push(v, l, r);
-    if (ql <= l && r <= qr) {
-        return tree_values[v];
-    }
-    return ComputeSum(v * 2, l, (l + r) / 2, ql, qr)
-        + ComputeSum(v * 2 + 1, (l + r) / 2, r, ql, qr);
+string_view ReadStopName(string_view& s) {
+    auto lhs = ReadToken(s, ": ");
+    return lhs;
 }
 
-void Add(size_t v, size_t l, size_t r, size_t ql, size_t qr, const MoneyState& value) {
-    if (v >= VERTEX_COUNT || qr <= l || r <= ql) {
-        return;
-    }
-    Push(v, l, r);
-    if (ql <= l && r <= qr) {
-        tree_add[v] += value;
-        tree_values[v] += value * (r - l);
-        return;
-    }
-    Add(v * 2, l, (l + r) / 2, ql, qr, value);
-    Add(v * 2 + 1, (l + r) / 2, r, ql, qr, value);
-    tree_values[v] =
-        (v * 2 < VERTEX_COUNT ? tree_values[v * 2] : MoneyState{})
-        + (v * 2 + 1 < VERTEX_COUNT ? tree_values[v * 2 + 1] : MoneyState{});
+double ReadLatitude(string_view& s) {
+    auto lhs = ReadToken(s, ", ");
+    double value = ConvertToDouble(lhs);
+    return value;
 }
 
-void Multiply(size_t v, size_t l, size_t r, size_t ql, size_t qr, double value) {
-    if (v >= VERTEX_COUNT || qr <= l || r <= ql) {
-        return;
-    }
-    Push(v, l, r);
-    if (ql <= l && r <= qr) {
-        tree_factor[v] *= value;
-        tree_add[v].earned *= value;
-        tree_values[v].earned *= value;
-        return;
-    }
-    Multiply(v * 2, l, (l + r) / 2, ql, qr, value);
-    Multiply(v * 2 + 1, (l + r) / 2, r, ql, qr, value);
-    tree_values[v] =
-        (v * 2 < VERTEX_COUNT ? tree_values[v * 2] : MoneyState{})
-        + (v * 2 + 1 < VERTEX_COUNT ? tree_values[v * 2 + 1] : MoneyState{});
+double ReadLongitude(string_view& s) {
+    double value = ConvertToDouble(ReadToken(s));
+    return value;
 }
 
+pair<string_view, int> ReadDistToStop(string_view s) {
+	auto dist = ReadToken(s, "m to ");
+	auto stop = s;
+	return { s, stoi(string(dist))};
+}
+
+vector<pair<string, int>> ReadDistanceToStops(string_view& s) {
+	vector<pair<string, int>> distToStops;
+	while (!s.empty()) {
+		auto lhs = ReadToken(s, ", ");
+		distToStops.emplace_back(ReadDistToStop(lhs));
+	}
+	return distToStops;
+}
+
+
+void ReadRoutingSettings(DirectoryTransport& directory, const Json::Node& node) {
+	const map<string, Json::Node>& settings = node.AsMap();
+	directory.SetWaitTime(settings.at("bus_wait_time").AsInt());
+	directory.SetBusVelocity(settings.at("bus_velocity").AsInt());
+}
+
+#ifdef _MSC_VER
+
+void Test(string input_json_file, string output_json_file, string my_output_json_file) {
+	fstream ssInput(input_json_file);
+	if (!ssInput.is_open()) {
+		cout << "File input.txt is not open!" << endl;
+		return;
+	}
+
+	stringstream ssOutput;
+
+	Json::Document doc = Json::Load(ssInput);
+	const map<string, Json::Node>& nodes = doc.GetRoot().AsMap();
+
+	DirectoryTransport directory;
+	if (nodes.count("routing_settings")) {
+		ReadRoutingSettings(directory, nodes.at("routing_settings"));
+	}
+	if (nodes.count("base_requests")) {
+		const auto create_requests = ReadCreateRequests(nodes.at("base_requests"));
+		const auto create_responses = ProcessCreateRequests(directory, create_requests);
+	}
+
+	if (nodes.count("stat_requests")) {
+		const auto database_requests = ReadDatabaseRequests(nodes.at("stat_requests"));
+		const auto responses = ProcessDatabaseRequests(directory, database_requests);
+		PrintResponses(responses, ssOutput);
+	}
+
+	fstream ideal(output_json_file);
+	if (!ssInput.is_open()) {
+		cout << "File ideal.txt is not open!" << endl;
+		return;
+	}
+
+	string sIdeal;
+	string tmp = "";
+	while (getline(ideal, tmp)) {
+		sIdeal += tmp;
+	}
+
+	string sOutput = ssOutput.str();
+
+	fstream outputFile(my_output_json_file);
+	outputFile << sOutput;
+
+	ASSERT_EQUAL(sIdeal, sOutput);
+}
+
+void Test0() {
+	Test("transport-test0-input.json",
+		"transport-test0-output.json",
+		"transport-test0-my-output.json");
+}
+
+void Test2() {
+	Test("transport-test2-input.json",
+		"transport-test2-output.json",
+		"transport-test2-my-output.json");
+}
+
+void ETest1() {
+	Test("transport-e-test1-input.json",
+		"transport-e-test1-output.json",
+		"transport-e-test1-my-output.json");
+}
+
+void ETest2() {
+	Test("transport-e-test2-input.json",
+		"transport-e-test2-output.json",
+		"transport-e-test2-my-output.json");
+}
+
+void ETest3() {
+	Test("transport-e-test3-input.json",
+		"transport-e-test3-output.json",
+		"transport-e-test3-my-output.json");
+}
+
+void Test1() {
+	fstream ssInput("transport-input_test1.json");
+	if (!ssInput.is_open()) {
+		cout << "File input.txt is not open!" << endl;
+		return;
+	}
+
+	stringstream ssOutput;
+
+	Json::Document doc = Json::Load(ssInput);
+	const map<string, Json::Node>& nodes = doc.GetRoot().AsMap();
+
+	DirectoryTransport directory;
+	if (nodes.count("routing_settings")) {
+		ReadRoutingSettings(directory, nodes.at("routing_settings"));
+	}
+	if (nodes.count("base_requests")) {
+		const auto create_requests = ReadCreateRequests(nodes.at("base_requests"));
+		const auto create_responses = ProcessCreateRequests(directory, create_requests);
+	}
+
+	if (nodes.count("stat_requests")) {
+		const auto database_requests = ReadDatabaseRequests(nodes.at("stat_requests"));
+		const auto responses = ProcessDatabaseRequests(directory, database_requests);
+		PrintResponses(responses, ssOutput);
+	}
+
+	fstream ideal("transport-output_test1.json");
+	if (!ssInput.is_open()) {
+		cout << "File ideal.txt is not open!" << endl;
+		return;
+	}
+
+	string sIdeal;
+	string tmp = "";
+	while (getline(ideal, tmp)) {
+		sIdeal += tmp;
+	}
+
+	string sOutput = ssOutput.str();
+
+	fstream outputFile("output.txt");
+	outputFile << sOutput;
+
+	ASSERT_EQUAL(sIdeal, sOutput);
+}
+
+void TestMain() {
+	//stringstream ss2("{\"base_requests\": [{\"type\": \"Bus\", \"name\": \"256\", \"stops\": [\"Biryulyovo Zapadnoye\", \"Universam\", \"Biryulyovo Zapadnoye\"], \"is_roundtrip\": true}, {\"type\": \"Stop\", \"name\": \"Tolstopaltsevo\", \"latitude\": 55.611087, \"longitude\": 37.20829, \"road_distances\": {\"Marushkino\": 3900}}]}");
+	//Json::Document doc2 = Json::Load(ss2);
+	//
+	//string sTmp;
+	//string tmp1 = "";
+	//while (getline(ss2, tmp1)) {
+	//	sTmp += tmp1;
+	//}
+
+	
+	
+	fstream ssInput("transport-input4.json");
+	if (!ssInput.is_open()) {
+		cout << "File input.txt is not open!" << endl;
+		return;
+	}
+
+	stringstream ssOutput;
+
+	Json::Document doc = Json::Load(ssInput);
+	const map<string, Json::Node>& nodes = doc.GetRoot().AsMap();
+
+	DirectoryTransport directory;
+	if (nodes.count("routing_settings")) {
+		ReadRoutingSettings(directory, nodes.at("routing_settings"));
+	}
+	if (nodes.count("base_requests")) {
+		const auto create_requests = ReadCreateRequests(nodes.at("base_requests"));
+		const auto create_responses = ProcessCreateRequests(directory, create_requests);
+	}
+
+	if (nodes.count("stat_requests")) {
+		const auto database_requests = ReadDatabaseRequests(nodes.at("stat_requests"));
+		const auto responses = ProcessDatabaseRequests(directory, database_requests);
+		PrintResponses(responses, ssOutput);
+	}
+
+	fstream ideal("transport-output4.json");
+	if (!ssInput.is_open()) {
+		cout << "File ideal.txt is not open!" << endl;
+		return;
+	}
+
+	string sIdeal;
+	string tmp = "";
+	while (getline(ideal, tmp)) {
+		sIdeal += tmp;
+	}
+
+	string sOutput = ssOutput.str();
+
+	fstream outputFile("output.txt");
+	outputFile << sOutput;
+
+	ASSERT_EQUAL(sIdeal, sOutput);
+}
+
+#endif
 
 int main() {
-    cout.precision(25);
-    assert(DAY_COUNT <= DAY_COUNT_P2 && DAY_COUNT_P2 < DAY_COUNT * 2);
+   // try {
+#ifdef _MSC_VER
+        TestRunner tr;
+		//RUN_TEST(tr, Test0);
+		//RUN_TEST(tr, Test2);
+		//RUN_TEST(tr, ETest1);
+		//RUN_TEST(tr, ETest2);
+		RUN_TEST(tr, ETest3);
+		//RUN_TEST(tr, Test1);
+		//RUN_TEST(tr, TestMain);
 
-    Init();
+        //system("pause");
+#else
 
-    int q;
-    cin >> q;
+		Json::Document doc = Json::Load(cin);
+		const map<string, Json::Node>& nodes = doc.GetRoot().AsMap();
 
-    for (int i = 0; i < q; ++i) {
-        string query_type;
-        cin >> query_type;
-
-        string date_from_str, date_to_str;
-        cin >> date_from_str >> date_to_str;
-
-        auto idx_from = ComputeDayIndex(Date::FromString(date_from_str));
-        auto idx_to = ComputeDayIndex(Date::FromString(date_to_str)) + 1;
-
-        if (query_type == "ComputeIncome") {
-            cout << ComputeSum(1, 0, DAY_COUNT_P2, idx_from, idx_to).ComputeIncome() << endl;
-        }
-        else if (query_type == "PayTax") {
-            int percentage;
-            cin >> percentage;
-            Multiply(1, 0, DAY_COUNT_P2, idx_from, idx_to, 1.0 - percentage / 100.0);
-        }
-        else if (query_type == "Earn") {
-            double value;
-            cin >> value;
-            Add(1, 0, DAY_COUNT_P2, idx_from, idx_to, MoneyState{ .earned = value / (idx_to - idx_from) });
-        }
-        else if (query_type == "Spend") {
-            double value;
-            cin >> value;
-            Add(1, 0, DAY_COUNT_P2, idx_from, idx_to, MoneyState{ .spent = value / (idx_to - idx_from) });
-        }
-    }
+		DirectoryTransport directory;
+		ReadRoutingSettings(directory, nodes.at("routing_settings"));
+		const auto create_requests = ReadCreateRequests(nodes.at("base_requests"));
+		const auto create_responses = ProcessCreateRequests(directory, create_requests);
+		const auto database_requests = ReadDatabaseRequests(nodes.at("stat_requests"));
+		const auto responses = ProcessDatabaseRequests(directory, database_requests);
+		PrintResponses(responses);
+#endif
+    //}
+    //catch (exception& e) {
+    //    cerr << "main catch: " << e.what() << endl;
+    //    //throw;
+    //}
 
 #ifdef _MSC_VER
 	system("pause");
