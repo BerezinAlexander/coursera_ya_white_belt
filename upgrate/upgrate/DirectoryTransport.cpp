@@ -1,6 +1,7 @@
-#include <map>
-
 #include "DirectoryTransport.h"
+
+#include <map>
+#include <iterator>
 
 using namespace Graph;
 
@@ -76,6 +77,62 @@ DirectoryTransport::RouteResult DirectoryTransport::CalcRoute(string_view from, 
 	using namespace Graph;
 
 	createRouter();
+
+	const size_t STOPS_COUNT = stops.size();
+	const size_t VERTEX_COUNT = STOPS_COUNT * 2;
+
+	vector<string_view> v_stops;
+	v_stops.reserve(STOPS_COUNT);
+	unordered_map<string_view, size_t> m_stops;
+	m_stops.reserve(STOPS_COUNT);
+	for (const auto& [name, p] : stops) {
+		v_stops.push_back(name);
+		m_stops[name] = v_stops.size() - 1;
+	}
+
+	VertexId fromId = m_stops.at(from);
+	VertexId toId = m_stops.at(to) + STOPS_COUNT;
+
+	auto optRouteInfo = ptrRouter->BuildRoute(fromId, toId);
+
+	RouteResult result;
+
+	if (optRouteInfo.has_value()) {
+		const auto& routeInfo = optRouteInfo.value();
+		result.total_time = optRouteInfo.value().weight;
+
+		ItemRoute itemFirst;
+		itemFirst.time = waitTime;
+		itemFirst.type = RouteItemType::WAIT;
+		itemFirst.name = from;
+		itemFirst.count = 0;
+		result.total_time += itemFirst.time;
+		result.items.push_back(move(itemFirst));
+
+		for (size_t i = 0; i < optRouteInfo.value().edge_count; ++i) {
+			EdgeId edgeId = ptrRouter->GetRouteEdge(optRouteInfo.value().id, i);
+			if (edgesIndex.size() > edgeId) {
+				const auto& edgeParam = edgesIndex[edgeId];
+
+				if (edgeParam.type == RouteItemType::WAIT) {
+					ItemRoute item;
+					item.time = edgeParam.edge.weight;
+					item.type = RouteItemType::WAIT;
+					item.name = edgeParam.name;
+					item.count = 0;
+					result.items.push_back(move(item));
+				}
+				else {
+					ItemRoute item;
+					item.time = edgeParam.edge.weight;
+					item.type = RouteItemType::BUS;
+					item.name = edgeParam.name;
+					item.count = edgeParam.count_stops;
+					result.items.push_back(move(item));
+				}
+			}
+		}
+	}
 
 	//size_t beginStop = m_stops[from] + STOPS_COUNT;
 	//size_t endStop = m_stops[to];
@@ -167,7 +224,7 @@ DirectoryTransport::RouteResult DirectoryTransport::CalcRoute(string_view from, 
 	//		//result.items.emplace_back(edge.weight, );
 	//	}
 	//}
-	return DirectoryTransport::RouteResult(); // result;
+	return result;
 }
 
 int DirectoryTransport::calcStopCount(const vector<string>& stops_) const {
@@ -247,12 +304,25 @@ float DirectoryTransport::calcTime(int distance)
 	return (distance * 0.06f) / busVelocity;
 }
 
+int DirectoryTransport::getDistanceBetweenTwoNearStops(const string& stop1, const string& stop2)
+{
+	if (distanceBetweenStops.count(stop1)) {
+		const auto& umap = distanceBetweenStops.at(stop1);
+		if (umap.count(stop2)) {
+			return umap.at(stop2);
+		}
+	}
+	cout << "Stops is not neary!" << endl;
+	return 0;
+}
+
 void DirectoryTransport::createRouter()
 {
 	if (!ptrRouter) {
 		const size_t STOPS_COUNT = stops.size();
 		const size_t VERTEX_COUNT = STOPS_COUNT * 2;
-		DirectedWeightedGraph<float> graph(VERTEX_COUNT);
+		
+		graph = DirectedWeightedGraph<float>(VERTEX_COUNT);
 
 		vector<string_view> v_stops;
 		v_stops.reserve(STOPS_COUNT);
@@ -264,40 +334,85 @@ void DirectoryTransport::createRouter()
 		}
 
 		int count = 0;
-		for (auto& str : v_stops) {
-			cout << "[" << count++ << "]: " << str << endl;
+		for (const auto& str : v_stops) {
+			cout << "[" << count++ << "]: " << str << " " << m_stops[str] << " " << m_stops[str] + STOPS_COUNT << endl;
 		}
 
+		for (const auto& [bus, busStops] : buses) {
+			if (!busStops.empty()) {
+				for (auto itFrom = busStops.begin(); itFrom != prev(busStops.end()); ++itFrom) {
+					const auto& stopFrom = *itFrom;
+					double total_distance = 0;
+					for (auto itTo = next(busStops.begin()); itTo != busStops.end(); ++itTo) {
+						const auto& stopTo = *itTo;
+						
+						if (stopFrom == stopTo)
+							continue;
+						
+						auto itPrev = prev(itTo);
+						const auto& stopPrev = *itPrev;
+						total_distance += getDistanceBetweenTwoNearStops(stopPrev, stopTo);
+						
+						Edge<float> edge;
+						edge.from = m_stops.at(stopFrom);
+						edge.to = m_stops.at(stopTo) + STOPS_COUNT;
+						edge.weight = (total_distance * 60.) / (busVelocity * 1000.);
+						graph.AddEdge(edge);
 
-		for (const auto&[stop, distToStops] : distanceBetweenStops) {
-			{
-				Edge<float> edge;
-				edge.from = m_stops.at(stop);
-				edge.to = edge.from + STOPS_COUNT;
-				edge.weight = waitTime;
-				graph.AddEdge(edge);
+						EdgesParam param{ RouteItemType::BUS, edge, bus, std::distance(itFrom, itTo) };
+						edgesIndex.emplace_back(param);
 
-				cout << "Add edge: " << edge << endl;
-			}
-			{
-				Edge<float> edge;
-				edge.to = m_stops.at(stop);
-				edge.from = edge.to + STOPS_COUNT;
-				edge.weight = waitTime;
-				graph.AddEdge(edge);
-
-				cout << "Add edge: " << edge << endl;
-			}
-			for (const auto&[name, dist] : distToStops) {
-				Edge<float> edge;
-				edge.from = m_stops.at(stop);
-				edge.to = m_stops.at(name);
-				edge.weight = (dist * 60.) / (busVelocity * 1000.);
-				graph.AddEdge(edge);
-
-				cout << "Add edge: " << edge << endl;
+						cout << "Add edge: " << edge << endl;
+					}
+				}
 			}
 		}
+
+		for (const auto& [stop, crd] : stops){
+			Edge<float> edge;
+			edge.to = m_stops.at(stop);
+			edge.from = edge.to + STOPS_COUNT;
+			edge.weight = waitTime;
+			graph.AddEdge(edge);
+
+			EdgesParam param{ RouteItemType::WAIT, edge, stop, 0 };
+			edgesIndex.emplace_back(move(param));
+
+			cout << "Add edge: " << edge << endl;
+		}
+
+		//for (const auto&[stop, distToStops] : distanceBetweenStops) {
+		//	//{
+		//	//	Edge<float> edge;
+		//	//	edge.from = m_stops.at(stop);
+		//	//	edge.to = edge.from + STOPS_COUNT;
+		//	//	edge.weight = waitTime;
+		//	//	graph.AddEdge(edge);
+
+		//	//	cout << "Add edge: " << edge << endl;
+		//	//}
+		//	{
+		//		Edge<float> edge;
+		//		edge.to = m_stops.at(stop);
+		//		edge.from = edge.to + STOPS_COUNT;
+		//		edge.weight = waitTime;
+		//		graph.AddEdge(edge);
+		//		edgesIndex.emplace_back(RouteItemType::WAIT, edge);
+		//		
+
+		//		cout << "Add edge: " << edge << endl;
+		//	}
+		//	for (const auto&[name, dist] : distToStops) {
+		//		Edge<float> edge;
+		//		edge.from = m_stops.at(stop);
+		//		edge.to = m_stops.at(name) + STOPS_COUNT;
+		//		edge.weight = (dist * 60.) / (busVelocity * 1000.);
+		//		graph.AddEdge(edge);
+		//		edgesIndex.emplace_back(RouteItemType::BUS, edge);
+
+		//		cout << "Add edge: " << edge << endl;
+		//	}
+		//}
 
 		ptrRouter = make_unique<Router<float>>(graph);
 	}
@@ -332,22 +447,23 @@ void DirectoryTransport::formationVertexes()
 		size_t prev_id;
 		for (auto it = stops_.begin(); it != stops_.end(); ++it) {
 			size_t cur_id = id;
-			if (cur_stops.count(*it) == 0) {
+			string& stopName = *it;
+			if (cur_stops.count(stopName) == 0) {
 				VertexData data;
 				data.id = cur_id;
 				data.stopName = *it;
 				data.busName = bus;
 				data.busStopIt = it;
 				vertexes.push_back(data);
-				cur_stops[*it] = cur_id;
+				cur_stops[stopName] = cur_id;
 			}
 			else {
-				cur_id = cur_stops[*it];
+				cur_id = cur_stops[stopName];
 			}
 
 			Edge<float> edge;
-			if (stops.count(data.stopName)) {
-				size_t curId = stopToVertexId.at(data.stopName);
+			if (stops.count(stopName)) {
+				size_t curId = stopToVertexId.at(stopName);
 				edge.from = curId;
 				edge.to = id;
 				edge.weight = waitTime;

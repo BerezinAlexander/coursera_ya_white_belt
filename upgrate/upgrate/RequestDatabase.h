@@ -60,11 +60,11 @@ struct ComputeBusDatabaseRequest : ReadDatabaseRequest<string> {
 		}
 		else {
 			stream << "{";
-			stream << "\"request_id\": " << id << ", ";
-			stream << "\"stop_count\": " << info.stopCount << ", ";
+			stream << "\"curvature\": " << info.curvature << ", ";
 			stream << "\"unique_stop_count\": " << info.uniqueStopCount << ", ";
-			stream << "\"route_length\": " << info.lengthRoute << ", ";
-			stream << "\"curvature\": " << info.curvature;
+			stream << "\"stop_count\": " << info.stopCount << ", ";
+			stream << "\"request_id\": " << id << ", ";
+			stream << "\"route_length\": " << info.lengthRoute;
 			stream << "}";
 		}
 		return stream.str();

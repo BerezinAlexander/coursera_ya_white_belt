@@ -206,6 +206,12 @@ void Test2() {
 		"transport-test2-my-output.json");
 }
 
+void ETest1() {
+	Test("transport-e-test1-input.json",
+		"transport-e-test1-output.json",
+		"transport-e-test1-my-output.json");
+}
+
 void Test1() {
 	fstream ssInput("transport-input_test1.json");
 	if (!ssInput.is_open()) {
@@ -317,8 +323,9 @@ int main() {
    // try {
 #ifdef _MSC_VER
         TestRunner tr;
-		RUN_TEST(tr, Test0);
-		RUN_TEST(tr, Test2);
+		//RUN_TEST(tr, Test0);
+		//RUN_TEST(tr, Test2);
+		RUN_TEST(tr, ETest1);
 		//RUN_TEST(tr, Test1);
 		//RUN_TEST(tr, TestMain);
 

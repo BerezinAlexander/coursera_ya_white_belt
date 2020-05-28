@@ -31,10 +31,10 @@ public:
 
 	// участок маршрута
 	struct ItemRoute {
+		RouteItemType type; 
 		double time;
-		RouteItemType type;
-		int count;
-		string name;
+		string name; // маршрута или остановки
+		int count; // количество остановок, которые нужно проехать (только для автобуса)
 	};
 
 	// информация по маршруту
@@ -42,6 +42,8 @@ public:
 		double total_time;
 		vector<ItemRoute> items;
 	};
+
+	DirectoryTransport() : graph(0) {}
 	
 	// добавление автобуса
 	void addBus(string_view number, const vector<string>& stops);
@@ -95,6 +97,8 @@ private:
 	// формирование вершин
 	void formationVertexes();
 
+	int getDistanceBetweenTwoNearStops(const string& stop1, const string& stop2);
+
 private:
 	unordered_map<string, vector<string>> buses;	// автобусы и их остановки
 	unordered_map<string, pair<double, double>> stops; // остановки и их координаты
@@ -104,4 +108,15 @@ private:
 	int waitTime; // время ожидания автобуса
 	int busVelocity; // скорость автобусов
 	unique_ptr<Graph::Router<float>> ptrRouter;
+	Graph::DirectedWeightedGraph<float> graph;
+
+
+	struct EdgesParam {
+		RouteItemType type;
+		Graph::Edge<float> edge;
+		string name;
+		int count_stops;
+	};
+
+	vector<EdgesParam> edgesIndex;
 };
