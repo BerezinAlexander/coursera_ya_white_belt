@@ -2,6 +2,7 @@
 
 #include <map>
 #include <iterator>
+#include <cmath>
 
 using namespace Graph;
 
@@ -73,7 +74,17 @@ void DirectoryTransport::SetBusVelocity(int v) {
 
 // рассчитать оптимальный маршрут
 
-DirectoryTransport::RouteResult DirectoryTransport::CalcRoute(string_view from, string_view to) {
+DirectoryTransport::RouteResult DirectoryTransport::CalcRoute(string_view from, string_view to) 
+{
+	RouteResult result;
+	result.isCorrect = false;
+	
+	if (from == to) {
+		result.isCorrect = true;
+		result.total_time = 0;
+		return result;
+	}
+	
 	using namespace Graph;
 
 	createRouter();
@@ -95,7 +106,7 @@ DirectoryTransport::RouteResult DirectoryTransport::CalcRoute(string_view from, 
 
 	auto optRouteInfo = ptrRouter->BuildRoute(fromId, toId);
 
-	RouteResult result;
+	
 
 	if (optRouteInfo.has_value()) {
 		const auto& routeInfo = optRouteInfo.value();
@@ -132,6 +143,8 @@ DirectoryTransport::RouteResult DirectoryTransport::CalcRoute(string_view from, 
 				}
 			}
 		}
+
+		result.isCorrect = true;
 	}
 
 	//size_t beginStop = m_stops[from] + STOPS_COUNT;
@@ -312,7 +325,11 @@ int DirectoryTransport::getDistanceBetweenTwoNearStops(const string& stop1, cons
 			return umap.at(stop2);
 		}
 	}
+
+#ifdef _MSC_VER
 	cout << "Stops is not neary!" << endl;
+#endif
+
 	return 0;
 }
 
@@ -333,36 +350,50 @@ void DirectoryTransport::createRouter()
 			m_stops[name] = v_stops.size() - 1;
 		}
 
+#ifdef _MSC_VER
 		int count = 0;
 		for (const auto& str : v_stops) {
 			cout << "[" << count++ << "]: " << str << " " << m_stops[str] << " " << m_stops[str] + STOPS_COUNT << endl;
 		}
+#endif
 
 		for (const auto& [bus, busStops] : buses) {
 			if (!busStops.empty()) {
 				for (auto itFrom = busStops.begin(); itFrom != prev(busStops.end()); ++itFrom) {
 					const auto& stopFrom = *itFrom;
 					double total_distance = 0;
-					for (auto itTo = next(busStops.begin()); itTo != busStops.end(); ++itTo) {
+
+					if (bus == "297") {
+						int rt = 54;
+					}
+
+					for (auto itTo = next(itFrom); itTo != busStops.end(); ++itTo) {
 						const auto& stopTo = *itTo;
-						
+
 						if (stopFrom == stopTo)
 							continue;
-						
+
 						auto itPrev = prev(itTo);
 						const auto& stopPrev = *itPrev;
 						total_distance += getDistanceBetweenTwoNearStops(stopPrev, stopTo);
-						
+
 						Edge<float> edge;
 						edge.from = m_stops.at(stopFrom);
 						edge.to = m_stops.at(stopTo) + STOPS_COUNT;
 						edge.weight = (total_distance * 60.) / (busVelocity * 1000.);
 						graph.AddEdge(edge);
 
-						EdgesParam param{ RouteItemType::BUS, edge, bus, std::distance(itFrom, itTo) };
+						EdgesParam param;
+						param.type = RouteItemType::BUS;
+						param.edge = edge;
+						param.name = bus;
+						param.count_stops = std::distance(itFrom, itTo);
+
 						edgesIndex.emplace_back(param);
 
+#ifdef _MSC_VER
 						cout << "Add edge: " << edge << endl;
+#endif
 					}
 				}
 			}
@@ -375,10 +406,17 @@ void DirectoryTransport::createRouter()
 			edge.weight = waitTime;
 			graph.AddEdge(edge);
 
-			EdgesParam param{ RouteItemType::WAIT, edge, stop, 0 };
-			edgesIndex.emplace_back(move(param));
+			EdgesParam param;
+			param.type = RouteItemType::WAIT;
+			param.edge = edge;
+			param.name = stop;
+			param.count_stops = 0;
 
+			edgesIndex.emplace_back(param);
+
+#ifdef _MSC_VER
 			cout << "Add edge: " << edge << endl;
+#endif
 		}
 
 		//for (const auto&[stop, distToStops] : distanceBetweenStops) {

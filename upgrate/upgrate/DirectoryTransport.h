@@ -5,6 +5,7 @@
 #include <string>
 #include <string_view>
 #include <set>
+#include <memory>
 
 #include "graph.h"
 #include "router.h"
@@ -39,6 +40,7 @@ public:
 
 	// информация по маршруту
 	struct RouteResult {
+		bool isCorrect;
 		double total_time;
 		vector<ItemRoute> items;
 	};

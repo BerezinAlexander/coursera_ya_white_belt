@@ -60,11 +60,11 @@ struct ComputeBusDatabaseRequest : ReadDatabaseRequest<string> {
 		}
 		else {
 			stream << "{";
-			stream << "\"curvature\": " << info.curvature << ", ";
-			stream << "\"unique_stop_count\": " << info.uniqueStopCount << ", ";
 			stream << "\"stop_count\": " << info.stopCount << ", ";
-			stream << "\"request_id\": " << id << ", ";
-			stream << "\"route_length\": " << info.lengthRoute;
+			stream << "\"route_length\": " << info.lengthRoute << ", ";
+			stream << "\"unique_stop_count\": " << info.uniqueStopCount << ", ";
+			stream << "\"curvature\": " << info.curvature << ", ";
+			stream << "\"request_id\": " << id;
 			stream << "}";
 		}
 		return stream.str();
@@ -135,7 +135,7 @@ struct ComputeRouteDatabaseRequest : ReadDatabaseRequest<string> {
 		stringstream stream;
 		stream << "{";
 
-		if (routeRes.items.empty()) {
+		if (routeRes.items.empty() && !routeRes.isCorrect) {
 			stream << "\"request_id\": " << id << ", ";
 			stream << "\"error_message\": \"not found\"";
 		}

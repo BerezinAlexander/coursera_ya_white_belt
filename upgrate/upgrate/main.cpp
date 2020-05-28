@@ -212,6 +212,18 @@ void ETest1() {
 		"transport-e-test1-my-output.json");
 }
 
+void ETest2() {
+	Test("transport-e-test2-input.json",
+		"transport-e-test2-output.json",
+		"transport-e-test2-my-output.json");
+}
+
+void ETest3() {
+	Test("transport-e-test3-input.json",
+		"transport-e-test3-output.json",
+		"transport-e-test3-my-output.json");
+}
+
 void Test1() {
 	fstream ssInput("transport-input_test1.json");
 	if (!ssInput.is_open()) {
@@ -325,7 +337,9 @@ int main() {
         TestRunner tr;
 		//RUN_TEST(tr, Test0);
 		//RUN_TEST(tr, Test2);
-		RUN_TEST(tr, ETest1);
+		//RUN_TEST(tr, ETest1);
+		//RUN_TEST(tr, ETest2);
+		RUN_TEST(tr, ETest3);
 		//RUN_TEST(tr, Test1);
 		//RUN_TEST(tr, TestMain);
 
@@ -336,7 +350,7 @@ int main() {
 		const map<string, Json::Node>& nodes = doc.GetRoot().AsMap();
 
 		DirectoryTransport directory;
-		ReadRoutingSettings(directory, node.at("routing_settings"));
+		ReadRoutingSettings(directory, nodes.at("routing_settings"));
 		const auto create_requests = ReadCreateRequests(nodes.at("base_requests"));
 		const auto create_responses = ProcessCreateRequests(directory, create_requests);
 		const auto database_requests = ReadDatabaseRequests(nodes.at("stat_requests"));
